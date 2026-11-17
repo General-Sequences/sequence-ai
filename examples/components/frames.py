@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 General Sequences Company
 # SPDX-License-Identifier: Apache-2.0
 """
-frames, alone: a camera frame resized to the size its policy takes, then encoded.
+frames, alone: a camera frame resized to the size its policy takes, then encoded, and decoded as the server does.
 
     python examples/components/frames.py            # needs Pillow
 """
@@ -19,3 +19,7 @@ print("stretch:", np.asarray(stretched).shape)
 
 text = frames.encode(padded)                                   # JPEG, base64: what is uploaded
 print(f"encoded: {len(text):,} characters for {frame.nbytes:,} bytes; size from its header: {frames.image_size(text)}")
+
+image = frames.decode(text)                                    # on the server: the array its policy reads
+error = np.abs(image.astype(int) - np.asarray(padded)).mean()
+print(f"decoded: {image.shape} {image.dtype}, {error:.1f} levels from the frame on average")

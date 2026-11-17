@@ -601,7 +601,7 @@ of components for the connection underneath, and you use it in one of three ways
 
 | You run | You keep | You add from `sequence_ai.network` |
 |---|---|---|
-| openpi | openpi's server and client, unchanged | one line on the robot: `openpi.keep(policy)` |
+| openpi | openpi's server and client, unchanged | on the robot, `openpi.keep(policy)`, and `image_tools` from `sequence_ai.network.openpi` for pictures as JPEG; on the GPU, its server started through `python -m sequence_ai.network.openpi` |
 | LeRobot's remote inference | LeRobot's server and client, unchanged | one Zenoh setting, in a file: `lerobot.keep_alive_file(path)` |
 | your own server | your model and your handler | `connect()` on the robot; `one_write`, `ping`, `compressed`, `tcp_link` on the server |
 
@@ -617,7 +617,7 @@ against openpi or LeRobot has been made.
 | Starts with | `uv run scripts/serve_policy.py --env=...` and `WebsocketClientPolicy(host, port)` | `lerobot-policy-server` and `lerobot-rollout --inference.type=remote` | `connect(url)` against your own server |
 | Transport | WebSocket; the client opens one connection and reuses it | Zenoh, over TCP by default (`tcp/127.0.0.1:7447`) | HTTP on one persistent connection; options for WebSocket servers |
 | Message format | msgpack, numpy arrays as raw bytes | msgpack, arrays as raw bytes | msgpack, numpy arrays as raw bytes; reads openpi's array layout and msgpack-numpy's |
-| Camera frames | Resized on the robot with `image_tools.resize_with_pad` | Sent raw, or as JPEG (`encoding`, `jpeg_quality`) | `frames.resize_image` (its `"pad"` is openpi's `resize_with_pad`), `frames.encode` for JPEG, lossless `compress` |
+| Camera frames | Resized on the robot with `image_tools.resize_with_pad` | Sent raw, or as JPEG (`encoding`, `jpeg_quality`) | `frames.resize_image` (its `"pad"` is openpi's `resize_with_pad`), `frames.encode` for JPEG and `frames.decode` on the server, `openpi.image_tools` and `openpi.patch()` for openpi's own client and server, lossless `compress` |
 | Action chunks | `ActionChunkBroker` executes a chunk open-loop and requests the next when it is exhausted | Requests ahead of time, based on the turnaround it measured; aligns the new chunk with the one being executed; real-time chunking modes | None: `link.act()` returns your server's response |
 | Robots on one server | Each connection's handler calls `policy.infer` itself; no batching across connections | One robot session; a second receives `busy` | Whatever your server does; `sequence_ai.engine` has `batcher`, `slack` and `replicas` |
 | Timing it reports | `server_timing` in each response: the model's time in milliseconds | The turnaround of recent requests, kept by the client | p50, p95 and p99 of each request (`link.stats()`); each client's RTT and retransmissions, from the server's kernel (`tcp_link`) |
@@ -643,14 +643,15 @@ statement about the mechanism. Whether it costs anything depends on the link, an
 
 | | Tested | Not tested |
 |---|---|---|
-| openpi | `openpi.keep()` on openpi-client 0.1.2's real `WebsocketClientPolicy`, against a stand-in server speaking openpi's protocol on one machine ([`examples/quickstart_openpi.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/quickstart_openpi.py), `tests/network/test_openpi.py`). On a real link: `openpi.keep()`, and a server that pings, on a WebSocket connection of the kind openpi holds, with a stand-in for its client ([Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md)). For the technical report: openpi's policy server (commit `215abfb`, `pi05_droid`, on an L4) and its own client in a closed loop over a home connection, with no network component of this package on the connection; and the same server and client with `openpi.keep()`, from a Linux virtual machine on a home connection ([the table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#openpikeep-with-openpis-own-server-and-client)) | A server that pings, with openpi's own policy server; `openpi.keep()` with that server on more than one link |
+| openpi | `openpi.keep()` on openpi-client 0.1.2's real `WebsocketClientPolicy`, against a stand-in server speaking openpi's protocol on one machine ([`examples/quickstart_openpi.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/quickstart_openpi.py), `tests/network/test_openpi.py`). On a real link: `openpi.keep()`, and a server that pings, on a WebSocket connection of the kind openpi holds, with a stand-in for its client ([Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md)). For the technical report: openpi's policy server (commit `215abfb`, `pi05_droid`, on an L4) and its own client in a closed loop over a home connection, with no network component of this package on the connection; and the same server and client with `openpi.keep()`, from a Linux virtual machine on a home connection ([the table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#openpikeep-with-openpis-own-server-and-client)); and the same server pinging and decoding the pictures as `openpi.patch()` makes it, with the client sending them as JPEG as `openpi.image_tools` does, from a Mac on a home connection ([the table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#pictures-as-jpeg-with-openpis-own-server-and-client)). `openpi.patch()`, the command and `image_tools` against a server module built as openpi's (`tests/network/test_openpi_server.py`) | The server's pings and the JPEG apart; either, and `openpi.keep()`, with openpi's own server on more than one link |
 | LeRobot | The keep-alive file on Zenoh 1.10.2: two idle peers on one machine then sent a frame about every 100 ms each way (`tests/network/test_lerobot.py`). On a real link: two Zenoh peers, with and without the file ([Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md)) | LeRobot's client or server, with or without the file |
 | The components alone | Every measurement in the [README's table](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#results), with the tool in [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench) or the servers named there | Those measurements with openpi or LeRobot as the server |
 
 ## Which should I use?
 
-- **You serve an openpi model (π0, π0-FAST, π0.5).** Use openpi's server and client. Add `openpi.keep(policy)` if the
-  robot is on Linux and pauses between chunks:
+- **You serve an openpi model (π0, π0-FAST, π0.5).** Use openpi's server and client. Start the server through
+  `python -m sequence_ai.network.openpi` and import `image_tools` from it on the robot to send the pictures as JPEG, and
+  add `openpi.keep(policy)` if the robot is on Linux and pauses between chunks:
   [How do I run π0 (openpi) on a remote GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md)
 - **You serve a LeRobot policy.** Use LeRobot's remote inference. Add the Zenoh file on both sides:
   [How do I reduce the latency of LeRobot remote inference?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-reduce-the-latency-of-lerobot-remote-inference.md)
@@ -704,7 +705,7 @@ Python 3.12, so the components that read the Linux kernel return `None` or `Fals
 |---|---|---|---|
 | [`window`](#window-the-congestion-window-kept-through-the-pauses) | [`ping`](#ping-a-server-side-ping) | [`msgpack_io`](#msgpack_io) | [`connect`](#connect-the-client-side-components-combined) |
 | [`compress`](#compress-only-where-it-saves-time) | [`one_write`](#one_write-a-response-in-one-write) | [`latency_stats`](#latency_stats) | [`openpi`](#openpi-and-lerobot) |
-| [`frames`](#frames-a-frame-resized-before-upload) | [`tcp_link`](#tcp_link-each-clients-link-read-from-the-kernel) | | [`lerobot`](#openpi-and-lerobot) |
+| [`frames`](#frames-a-frame-resized-before-upload-and-decoded-on-the-server) | [`tcp_link`](#tcp_link-each-clients-link-read-from-the-kernel) | | [`lerobot`](#openpi-and-lerobot) |
 | [`wifi_power`](#wifi_power-wi-fi-power-saving-detected) | [`compressed`](#compressed-decompress-what-the-client-compressed) | | [`bench/`](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-measure-the-link-between-my-robot-and-my-gpu.md) |
 
 What a component saves depends on your link, and every number below is given with the link it was measured on. The
@@ -786,17 +787,21 @@ The example's frame is synthetic, flat regions and edges, so it compresses far m
 line shows the rule: once the link is fast enough that compressing costs more than it saves, the frame is sent
 uncompressed.
 
-### `frames`: a frame resized before upload
+### `frames`: a frame resized before upload, and decoded on the server
 
 ```python
 from sequence_ai.network import frames
 
 frame = frames.resize_image(camera.read(), 224, 224, mode="pad", filter="bilinear")
+data = frames.encode(frame)            # a base64 JPEG
+image = frames.decode(data)            # on the server: the HxWx3 uint8 array its policy reads
 ```
 
 `"pad"` is openpi's `resize_with_pad`, byte for byte. The mode and the filter have no default and must be passed: a
 policy sees what it was trained on. `frames.encode(frame)` gives a base64 JPEG for an input that carries its frames as
-text, and `frames.image_size(data)` reads a frame's width and height from its header without Pillow.
+text, and `frames.image_size(data)` reads a frame's width and height from its header without Pillow. On the server,
+`frames.decode(data)` turns that JPEG, or a PNG, back into the array, and returns an array it is given unchanged. It
+opens no other format, since a picture comes over the network.
 
 `python examples/components/frames.py` printed:
 
@@ -804,6 +809,7 @@ text, and `frames.image_size(data)` reads a frame's width and height from its he
 pad: (224, 224, 3) with black rows at the top: True
 stretch: (224, 224, 3)
 encoded: 17,056 characters for 921,600 bytes; size from its header: (224, 224)
+decoded: (224, 224, 3) uint8, 2.0 levels from the frame on average
 ```
 
 ### `wifi_power`: Wi-Fi power saving, detected
@@ -864,7 +870,10 @@ call. `connect()` keeps one.
 import websockets
 from sequence_ai.network import ping
 
-async with websockets.serve(handler, host, port, **ping.websockets_options()):    # a ping every 100 ms
+async with ping.serve(handler, host, port) as server:      # websockets' own server, with a ping every 100 ms
+    await server.serve_forever()
+
+async with websockets.serve(handler, host, port, **ping.websockets_options()):    # the same, as its options
     ...
 
 uvicorn.run(app, **ping.uvicorn_options())                                         # the same, under uvicorn
@@ -985,21 +994,35 @@ A percentile is `None` until its window contains enough samples for it: the p99 
 
 ## openpi and LeRobot
 
-**openpi.** Keep openpi's client, and add the client-side components to the connection it holds.
+**openpi.** Keep openpi's client and server. On the GPU, start openpi's own server through this package: it then pings
+each robot every 100 ms and hands its policy each picture sent as JPEG as the array it reads. On the robot, import
+`image_tools` from here, so its pictures go as JPEG, and add the client-side components to the connection the client
+holds.
+
+```bash
+uv run --with sequence-ai python -m sequence_ai.network.openpi scripts/serve_policy.py --env=DROID   # the GPU
+```
 
 ```python
 from openpi_client import websocket_client_policy
 from sequence_ai.network import openpi
+from sequence_ai.network.openpi import image_tools     # in place of openpi_client's: pictures go as JPEG
 
 policy = websocket_client_policy.WebsocketClientPolicy(host, port)
 kept = openpi.keep(policy)             # BBR and TCP keepalive on its socket; a WebSocket ping while it is idle
+observation["observation/image"] = image_tools.resize_with_pad(frame, 224, 224)
 action = policy.infer(observation)     # as before
 ```
 
-Verified against openpi-client 0.1.2 on a local connection. Measured on a WebSocket connection of the kind openpi's
-client holds, between two cloud machines: a 100 KB upload 0.53 s after each response took two to three round trips
-without it and one with it ([Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md)). With openpi's own server and client it was measured in
-one closed-loop run ([the table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#openpikeep-with-openpis-own-server-and-client)).
+In a server script of your own, `openpi.patch()` before it makes openpi's server does what the command does.
+
+`keep()` is verified against openpi-client 0.1.2 on a local connection, and the server side and `image_tools` against
+a server module built as openpi's `websocket_policy_server.py` is. Measured on a WebSocket connection of the kind
+openpi's client holds, between two cloud machines: a 100 KB upload 0.53 s after each response took two to three round
+trips without `keep()` and one with it ([Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md)). With openpi's own server and client, `keep()`
+was measured in one closed-loop run ([the table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#openpikeep-with-openpis-own-server-and-client)), and
+the pictures as JPEG with the server's pings in another
+([the table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#pictures-as-jpeg-with-openpis-own-server-and-client)).
 [How do I run π0 (openpi) on a remote GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md)
 
 **LeRobot.** LeRobot 0.7.0's remote inference talks over Zenoh, which sends a frame on an idle link only every few
@@ -1080,7 +1103,8 @@ array the server sent comes back as nested lists:
 ### `ImportError: resizing a frame needs Pillow, which is not installed here`
 
 Pillow is a dependency of `sequence-ai`. The error appears where `frames.py` was copied into a project that has no
-Pillow: `pip install pillow`. `frames.resize_image` and `frames.encode` use Pillow; no other component does.
+Pillow: `pip install pillow`. `frames.resize_image`, `frames.encode` and `frames.decode` use Pillow, and
+`openpi.image_tools` and `openpi.patch()` through them; no other component does.
 
 ```text
 ImportError: resizing a frame needs Pillow, which is not installed here: pip install pillow
@@ -1487,7 +1511,10 @@ No. `cuda_graphs` keeps a graph only when its output equals eager mode's byte fo
 call the output your model produced for it. `replicas` and `slack` do not modify the model. No network component
 touches the model, and `compress` is lossless: the server gets back the bytes the robot built.
 `frames.resize_image` and `frames.encode` do change pixels, which is their purpose, and only where you call them: the
-resize mode and filter have no default, so you name the ones your policy was trained with.
+resize mode and filter have no default, so you name the ones your policy was trained with. `openpi.image_tools` resizes
+as openpi's own does and then sends JPEG, and a server started through `sequence_ai.network.openpi` hands the policy the
+JPEG's pixels: at quality 95 they moved a π0.5 policy's actions by 5.9% on average over 50 real observations, about a
+tenth of what the policy's own sampling noise moves them.
 
 ### Do I need a GPU to try it?
 
@@ -1597,9 +1624,16 @@ With the `websockets` library:
 import websockets
 from sequence_ai.network import ping
 
-async with websockets.serve(handler, host, port, **ping.websockets_options()):    # a ping every 100 ms
+async with ping.serve(handler, host, port) as server:      # websockets' own server, with a ping every 100 ms
+    await server.serve_forever()
+
+async with websockets.serve(handler, host, port, **ping.websockets_options()):    # the same, as its options
     ...
 ```
+
+openpi's own policy server is built on the `websockets` library. Started through `python -m sequence_ai.network.openpi`,
+it pings each connection the same way, with no change to its files:
+[How do I run π0 (openpi) on a remote GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md)
 
 Under uvicorn:
 
@@ -1608,10 +1642,11 @@ uvicorn.run(app, **ping.uvicorn_options())
 ```
 
 ```bash
-pip install sequence-ai          # this component imports only the standard library
+pip install sequence-ai          # this component imports only the standard library, and websockets for ping.serve
 ```
 
-The two calls return plain options, so you can also write them out and install nothing:
+`ping.websockets_options()` and `ping.uvicorn_options()` return plain options, so you can also write them out and
+install nothing:
 
 ```text
 ping.websockets_options()  ->  {'ping_interval': 0.1, 'ping_timeout': 20.0}
@@ -2105,13 +2140,15 @@ Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i
 # How do I run π0 (openpi) on a remote GPU?
 
 Run openpi's own policy server on the GPU and openpi's own client on the robot, as openpi's guide describes.
-`sequence-ai` then adds one line on the robot, which keeps the connection that client already holds from going idle between
+`sequence-ai` then changes the command that starts the server, and two lines on the robot: the server pings each robot
+and takes its pictures as JPEG, and the robot sends them that way and keeps its connection from going idle between
 action chunks.
 
-On the GPU, in openpi's repository (the command is from openpi's `docs/remote_inference.md`; it serves on port 8000):
+On the GPU, in openpi's repository. openpi's `docs/remote_inference.md` starts the server with
+`uv run scripts/serve_policy.py --env=DROID`, on port 8000; this runs the same script, unchanged:
 
 ```bash
-uv run scripts/serve_policy.py --env=DROID
+uv run --with sequence-ai python -m sequence_ai.network.openpi scripts/serve_policy.py --env=DROID
 ```
 
 On the robot:
@@ -2119,37 +2156,45 @@ On the robot:
 ```python
 from openpi_client import websocket_client_policy
 from sequence_ai.network import openpi
+from sequence_ai.network.openpi import image_tools      # was: from openpi_client import image_tools
 
 policy = websocket_client_policy.WebsocketClientPolicy(host="YOUR_GPU", port=8000)
-kept = openpi.keep(policy)                              # the one line sequence-ai adds
+kept = openpi.keep(policy)                               # keeps the connection warm
+observation["observation/exterior_image_1_left"] = image_tools.resize_with_pad(frame, 224, 224)    # now a JPEG
 action_chunk = policy.infer(observation)["actions"]     # openpi's own call, unchanged
 ```
 
 ```bash
-pip install sequence-ai          # no extra needed: this component imports only the standard library
+pip install sequence-ai          # on the robot: no extra needed. The GPU's command above brings its own.
 ```
 
 π0 and π0.5 are the models; openpi is the repository that serves them. Nothing of openpi's is replaced here: the
-client, the server, the msgpack layout and the responses stay openpi's own.
+client, the server, the msgpack layout and the responses stay openpi's own. A server started this way serves a robot
+that sends arrays as before, and `keep()` needs nothing of the server; a robot that sends its pictures as JPEG needs the
+server started this way.
 
-## What the one line does
+## What the lines do
 
-`openpi.keep(policy)` takes the WebSocket connection the client opened and puts three things on it:
-
-| What | When it applies |
-|---|---|
-| BBR as the socket's congestion control | Linux, with the kernel's BBR module loaded (`sudo modprobe tcp_bbr`) |
-| TCP keepalive | every machine that takes the options |
-| A WebSocket ping each 100 ms the connection is idle, for 60 s after the last `infer()` | always |
+| Line | What it does | When it applies |
+|---|---|---|
+| `python -m sequence_ai.network.openpi`, on the GPU | openpi's server pings each connection every 100 ms, and hands its policy each picture sent as JPEG as the array it reads | always; a picture sent as an array reaches the policy as before |
+| `image_tools` from `sequence_ai.network.openpi`, on the robot | `resize_with_pad` fits each picture exactly as openpi's does, then returns it as base64 JPEG at quality 95; `convert_to_uint8` returns that as it is | always; the server must be started as above |
+| `openpi.keep(policy)`, on the robot | BBR as the socket's congestion control | Linux, with the kernel's BBR module loaded (`sudo modprobe tcp_bbr`) |
+| | TCP keepalive | every machine that takes the options |
+| | A WebSocket ping each 100 ms the connection is idle, for 60 s after the last `infer()` | always |
 
 A robot that executes an action chunk before requesting the next one leaves its connection silent in between. On
 Linux, a connection silent for longer than its retransmission timeout has its congestion window restarted, so the
 next observation can take more round trips to upload.
 [Why does my robot's upload get slow after a pause?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/why-does-my-robots-upload-get-slow-after-a-pause.md) has the
-mechanism and the links where it did and did not cost anything.
+mechanism and the links where it did and did not cost anything. The server's pings and `keep()`'s each keep the
+connection from going silent. JPEG makes the upload itself smaller: two 224 x 224 pictures are 301,056 bytes as arrays.
 
 `kept.bbr` reports whether the socket accepted BBR, `kept.congestion` which congestion control it now uses, and
 `kept.warm.pings` how many pings were answered. `kept.close()` stops the pings; the connection stays openpi's.
+
+In a server script of your own, call `openpi.patch()` before it makes openpi's `WebsocketPolicyServer`: that is what the
+command does before it runs `scripts/serve_policy.py`.
 
 ## Try it without a GPU or a checkpoint
 
@@ -2179,6 +2224,9 @@ Against a real openpi server, [`examples/openpi_robot.py`](https://github.com/Ge
 
 - **Verified:** `openpi.keep()` against openpi-client 0.1.2 on a local connection, as above and in
   `tests/network/test_openpi.py`.
+- **Verified:** the server's pings and its decoding, and `image_tools`, against a server module built as openpi's
+  `websocket_policy_server.py` is, on a local connection; and the command, against a script run as
+  `scripts/serve_policy.py` is (`tests/network/test_openpi_server.py`).
 - **Measured on a real link:** `keep()` on a WebSocket connection of the kind openpi's client
   holds (the `websockets` library on both ends, compression off, a stand-in for the client class), between two cloud
   machines. A 100 KB upload 0.53 s after each response took 37.6, 44.4, 82.4 and 163.8 ms at round-trip times (RTTs) of
@@ -2190,16 +2238,27 @@ Against a real openpi server, [`examples/openpi_robot.py`](https://github.com/Ge
   in one that lost packets; with the BBR module loaded as well, 86 and 91 ms.
   [The table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#openpikeep-with-openpis-own-server-and-client) has the idle times and the congestion
   window.
+- **Measured with openpi's own server and client, the pictures as JPEG:** one closed-loop run with π0.5 on an L4, the
+  robot a simulated arm on a Mac on a home connection, the server pinging. Each request's upload went from 301.5 KB to
+  18.8 KB, and the time it spent outside the server, beyond one RTT, from about 97 to about 21 ms at the median.
+  [The table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#pictures-as-jpeg-with-openpis-own-server-and-client).
 
 ## Limitations
 
 - With openpi's own policy server, `keep()` has been measured on one link only: two 45 s episodes per setting, from a
   Linux virtual machine on a home connection. In the episode that lost packets it was no better than without it.
+- The pictures as JPEG have been measured in one episode, against one with arrays, and together with the server's
+  pings: the two were not measured apart.
+- In that run the server took about 20 ms longer for each inference than when openpi's own command started it, with or
+  without the pings and the decoding. It was started through another script, as `python -m` starts it, and why that
+  costs time is not known. `openpi.patch()` in a server script of your own starts nothing through another script; it
+  has not been measured.
+- A JPEG is not the frame it was made from: at quality 95 it moved a π0.5 policy's actions by 5.9% on average over 50
+  real observations, about a tenth of what the policy's own sampling noise does
+  ([`frames.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/frames.py) has the measurement).
+- `patch()` changes openpi's server through its module's `_server` and its `WebsocketPolicyServer`, as openpi's
+  `websocket_policy_server.py` has them: a version built otherwise is refused with a `TypeError`, not changed.
 - The README's [limitations](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#limitations) list the links where the idle restart costs nothing.
-- The same ping from the server side has not been tested with openpi's server. That server is built on the
-  `websockets` library, whose `serve(...)` takes `ping_interval`; `ping.websockets_options()` gives
-  `{'ping_interval': 0.1, 'ping_timeout': 20.0}`. Passing it requires a change in openpi's
-  `websocket_policy_server.py`. `keep()` requires no change to openpi.
 
 ## What openpi already does
 
@@ -2208,18 +2267,26 @@ openpi's client and server already do several things a remote policy needs, so t
 - **One connection, kept open.** The client connects once and reuses the WebSocket for every `infer()`.
 - **Arrays as raw bytes.** Observations and responses are sent as msgpack with numpy arrays as raw bytes.
 - **Images resized on the robot.** openpi's guide resizes each image on the client with
-  `image_tools.resize_with_pad(img, 224, 224)` before sending it.
+  `image_tools.resize_with_pad(img, 224, 224)` before sending it, as an array.
 - **Action chunks executed open-loop.** `ActionChunkBroker` requests a new chunk only when the current one is
   exhausted.
 
-If you write your own server or client for an openpi model, `msgpack_io` reads openpi's array layout, and
-`frames.resize_image(..., mode="pad", filter="bilinear")` is openpi's `resize_with_pad`, byte for byte.
-[The comparison page](https://github.com/General-Sequences/sequence-ai/blob/main/docs/comparison.md) sets the two side by side.
+If you write your own server or client for an openpi model, `msgpack_io` reads openpi's array layout,
+`frames.resize_image(..., mode="pad", filter="bilinear")` is openpi's `resize_with_pad`, byte for byte, and
+`frames.decode` turns a picture sent as JPEG back into its array. [The comparison page](https://github.com/General-Sequences/sequence-ai/blob/main/docs/comparison.md) sets the two
+side by side.
 
 ## If something fails
 
 - `TypeError: this client keeps no WebSocket connection at _ws`: pass the `WebsocketClientPolicy` itself to
   `keep()`, not an `ActionChunkBroker` wrapped around it. Keep the broker for `infer()`.
+- `RuntimeError: Error in inference server:` on the robot, after its pictures went as JPEG: the server was started
+  without `sequence_ai.network.openpi`, so its policy was handed the pictures as text. Start it with the command above,
+  or import `image_tools` from `openpi_client` again.
+- `ValueError: observation/...: not a JPEG or PNG image` in the server's traceback: a picture under that key came as
+  text or bytes that are not one. Send it as `image_tools` makes it, or as an array.
+- `TypeError: this server is not built as openpi's websocket_policy_server.py is`: the openpi on the GPU starts its
+  server another way than `patch()` was written for. Start it with openpi's own command, and send arrays.
 - `ModuleNotFoundError: No module named 'typing_extensions'` on importing `openpi_client`: openpi-client 0.1.0 imports
   it without listing it as a dependency, so a new environment may lack it. `pip install typing_extensions`.
 - The client prints nothing and never returns: while the connection is refused it retries every 5 seconds, so the
@@ -2833,6 +2900,28 @@ which `kept.bbr` is true) both episodes matched the loss-free `keep()` episode.
 
 This is one link and two episodes per setting, and the client was a virtual machine whose packets the laptop forwards,
 not a robot's own Linux computer.
+
+## Pictures as JPEG with openpi's own server and client
+
+One closed-loop run with openpi's own policy server (the `pi05_droid` checkpoint, on an L4) and openpi's own client,
+the robot a simulated arm on a Mac on a home connection, two pictures of 224 x 224 in each request: first as arrays, as
+openpi's guide sends them, then as JPEG, each fitted and encoded as `openpi.image_tools` does it, with the server
+pinging each connection every 100 ms and decoding the pictures as `openpi.patch()` makes it do. Each row is one 45 s
+episode on the same GPU. "Outside the server" is the round trip the client measured minus the inference time the
+server reported; the RTT is a TCP echo to the GPU, measured during the episode.
+
+| Pictures | Upload per request | Outside the server, p50 (p95) | RTT, p50 | Frame to answer, p50 (p95) |
+|---|---|---|---|---|
+| Arrays | 301.5 KB | 153.8 (270.8) ms | 56.5 ms | 351.8 (468.0) ms |
+| JPEG, the server pinging | 18.8 KB | **58.1** (207.8) ms | 37.5 ms | 279.6 (429.6) ms |
+
+The link was faster during the second episode, so take its RTT out: the time outside the server beyond one RTT fell
+from about 97 ms to about 21 ms. The server took longer for each inference in the second episode, 219.7 against
+195.0 ms at the median, while the model's own time was the same (149.8 and 149.3 ms). That server was started through
+another script, as `python -m sequence_ai.network.openpi` starts it, and it was as slow with the pings and the decoding
+taken out: the difference is in how it was started, and its cause is not known.
+
+This is one link and one episode per setting, and the pings and the JPEG were not measured apart.
 
 ## From a Linux client on a home connection
 

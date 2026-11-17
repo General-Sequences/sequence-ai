@@ -54,7 +54,8 @@ array the server sent comes back as nested lists:
 ### `ImportError: resizing a frame needs Pillow, which is not installed here`
 
 Pillow is a dependency of `sequence-ai`. The error appears where `frames.py` was copied into a project that has no
-Pillow: `pip install pillow`. `frames.resize_image` and `frames.encode` use Pillow; no other component does.
+Pillow: `pip install pillow`. `frames.resize_image`, `frames.encode` and `frames.decode` use Pillow, and
+`openpi.image_tools` and `openpi.patch()` through them; no other component does.
 
 ```text
 ImportError: resizing a frame needs Pillow, which is not installed here: pip install pillow
@@ -461,7 +462,10 @@ No. `cuda_graphs` keeps a graph only when its output equals eager mode's byte fo
 call the output your model produced for it. `replicas` and `slack` do not modify the model. No network component
 touches the model, and `compress` is lossless: the server gets back the bytes the robot built.
 `frames.resize_image` and `frames.encode` do change pixels, which is their purpose, and only where you call them: the
-resize mode and filter have no default, so you name the ones your policy was trained with.
+resize mode and filter have no default, so you name the ones your policy was trained with. `openpi.image_tools` resizes
+as openpi's own does and then sends JPEG, and a server started through `sequence_ai.network.openpi` hands the policy the
+JPEG's pixels: at quality 95 they moved a π0.5 policy's actions by 5.9% on average over 50 real observations, about a
+tenth of what the policy's own sampling noise moves them.
 
 ### Do I need a GPU to try it?
 

@@ -8,7 +8,7 @@ Python 3.12, so the components that read the Linux kernel return `None` or `Fals
 |---|---|---|---|
 | [`window`](#window-the-congestion-window-kept-through-the-pauses) | [`ping`](#ping-a-server-side-ping) | [`msgpack_io`](#msgpack_io) | [`connect`](#connect-the-client-side-components-combined) |
 | [`compress`](#compress-only-where-it-saves-time) | [`one_write`](#one_write-a-response-in-one-write) | [`latency_stats`](#latency_stats) | [`openpi`](#openpi-and-lerobot) |
-| [`frames`](#frames-a-frame-resized-before-upload) | [`tcp_link`](#tcp_link-each-clients-link-read-from-the-kernel) | | [`lerobot`](#openpi-and-lerobot) |
+| [`frames`](#frames-a-frame-resized-before-upload-and-decoded-on-the-server) | [`tcp_link`](#tcp_link-each-clients-link-read-from-the-kernel) | | [`lerobot`](#openpi-and-lerobot) |
 | [`wifi_power`](#wifi_power-wi-fi-power-saving-detected) | [`compressed`](#compressed-decompress-what-the-client-compressed) | | [`bench/`](how-do-i-measure-the-link-between-my-robot-and-my-gpu.md) |
 
 What a component saves depends on your link, and every number below is given with the link it was measured on. The
@@ -90,17 +90,21 @@ The example's frame is synthetic, flat regions and edges, so it compresses far m
 line shows the rule: once the link is fast enough that compressing costs more than it saves, the frame is sent
 uncompressed.
 
-### `frames`: a frame resized before upload
+### `frames`: a frame resized before upload, and decoded on the server
 
 ```python
 from sequence_ai.network import frames
 
 frame = frames.resize_image(camera.read(), 224, 224, mode="pad", filter="bilinear")
+data = frames.encode(frame)            # a base64 JPEG
+image = frames.decode(data)            # on the server: the HxWx3 uint8 array its policy reads
 ```
 
 `"pad"` is openpi's `resize_with_pad`, byte for byte. The mode and the filter have no default and must be passed: a
 policy sees what it was trained on. `frames.encode(frame)` gives a base64 JPEG for an input that carries its frames as
-text, and `frames.image_size(data)` reads a frame's width and height from its header without Pillow.
+text, and `frames.image_size(data)` reads a frame's width and height from its header without Pillow. On the server,
+`frames.decode(data)` turns that JPEG, or a PNG, back into the array, and returns an array it is given unchanged. It
+opens no other format, since a picture comes over the network.
 
 `python examples/components/frames.py` printed:
 
@@ -108,6 +112,7 @@ text, and `frames.image_size(data)` reads a frame's width and height from its he
 pad: (224, 224, 3) with black rows at the top: True
 stretch: (224, 224, 3)
 encoded: 17,056 characters for 921,600 bytes; size from its header: (224, 224)
+decoded: (224, 224, 3) uint8, 2.0 levels from the frame on average
 ```
 
 ### `wifi_power`: Wi-Fi power saving, detected
@@ -168,7 +173,10 @@ call. `connect()` keeps one.
 import websockets
 from sequence_ai.network import ping
 
-async with websockets.serve(handler, host, port, **ping.websockets_options()):    # a ping every 100 ms
+async with ping.serve(handler, host, port) as server:      # websockets' own server, with a ping every 100 ms
+    await server.serve_forever()
+
+async with websockets.serve(handler, host, port, **ping.websockets_options()):    # the same, as its options
     ...
 
 uvicorn.run(app, **ping.uvicorn_options())                                         # the same, under uvicorn
@@ -289,21 +297,35 @@ A percentile is `None` until its window contains enough samples for it: the p99 
 
 ## openpi and LeRobot
 
-**openpi.** Keep openpi's client, and add the client-side components to the connection it holds.
+**openpi.** Keep openpi's client and server. On the GPU, start openpi's own server through this package: it then pings
+each robot every 100 ms and hands its policy each picture sent as JPEG as the array it reads. On the robot, import
+`image_tools` from here, so its pictures go as JPEG, and add the client-side components to the connection the client
+holds.
+
+```bash
+uv run --with sequence-ai python -m sequence_ai.network.openpi scripts/serve_policy.py --env=DROID   # the GPU
+```
 
 ```python
 from openpi_client import websocket_client_policy
 from sequence_ai.network import openpi
+from sequence_ai.network.openpi import image_tools     # in place of openpi_client's: pictures go as JPEG
 
 policy = websocket_client_policy.WebsocketClientPolicy(host, port)
 kept = openpi.keep(policy)             # BBR and TCP keepalive on its socket; a WebSocket ping while it is idle
+observation["observation/image"] = image_tools.resize_with_pad(frame, 224, 224)
 action = policy.infer(observation)     # as before
 ```
 
-Verified against openpi-client 0.1.2 on a local connection. Measured on a WebSocket connection of the kind openpi's
-client holds, between two cloud machines: a 100 KB upload 0.53 s after each response took two to three round trips
-without it and one with it ([Measurements](measurements.md)). With openpi's own server and client it was measured in
-one closed-loop run ([the table](measurements.md#openpikeep-with-openpis-own-server-and-client)).
+In a server script of your own, `openpi.patch()` before it makes openpi's server does what the command does.
+
+`keep()` is verified against openpi-client 0.1.2 on a local connection, and the server side and `image_tools` against
+a server module built as openpi's `websocket_policy_server.py` is. Measured on a WebSocket connection of the kind
+openpi's client holds, between two cloud machines: a 100 KB upload 0.53 s after each response took two to three round
+trips without `keep()` and one with it ([Measurements](measurements.md)). With openpi's own server and client, `keep()`
+was measured in one closed-loop run ([the table](measurements.md#openpikeep-with-openpis-own-server-and-client)), and
+the pictures as JPEG with the server's pings in another
+([the table](measurements.md#pictures-as-jpeg-with-openpis-own-server-and-client)).
 [How do I run π0 (openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md)
 
 **LeRobot.** LeRobot 0.7.0's remote inference talks over Zenoh, which sends a frame on an idle link only every few

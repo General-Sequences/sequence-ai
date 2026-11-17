@@ -4,7 +4,7 @@
 A camera frame resized on the robot (sequence_ai/network/frames.py): `encode()` sends a frame at its own size and
 returns already-encoded input without re-encoding it; `resize_image` resizes one the way a policy was trained, with its
 mode and filter passed explicitly; "pad" matches openpi's resize_with_pad byte for byte; `image_size` reads a frame's
-size from its header.
+size from its header; `decode` turns a JPEG or PNG back into the array on the server, and opens nothing else.
 
     python -m pytest -q tests/network/test_frames.py
 """
@@ -22,6 +22,7 @@ from sequence_ai.network.frames import (  # noqa: E402
     DEFAULT_JPEG_QUALITY,
     FILTERS,
     MODES,
+    decode,
     encode,
     image_size,
     resize_image,
@@ -134,3 +135,50 @@ def test_image_size_refuses_what_is_not_an_image():
                  base64.b64encode(gif.getvalue()).decode(), ""):
         with pytest.raises(ValueError):
             image_size(data)
+
+
+def _smooth(h: int, w: int):
+    """A frame of gradients, as a camera's are: JPEG at 95 keeps it within a few levels (noise it would not)."""
+    yy, xx = np.mgrid[0:h, 0:w]
+    return np.stack([xx * 255 // w, yy * 255 // h, (xx + yy) * 255 // (h + w)], -1).astype(np.uint8)
+
+
+def test_decode_turns_encodes_jpeg_back_into_the_array_close_to_the_frame():
+    frame = _smooth(224, 224)
+    back = decode(encode(frame))
+    assert back.shape == (224, 224, 3) and back.dtype == np.uint8
+    error = np.abs(back.astype(int) - frame.astype(int))
+    assert error.mean() < 2 and error.max() < 32
+    assert not back.flags.writeable                          # as msgpack_io reads an array
+    assert np.array_equal(decode("data:image/jpeg;base64," + encode(frame)), back)
+
+
+def test_decode_reads_a_png_exactly_as_text_or_bytes_and_in_rgb():
+    frame = _frame(48, 64, seed=4)
+    png = io.BytesIO()
+    Image.fromarray(frame).save(png, format="PNG")
+    for picture in (png.getvalue(), bytearray(png.getvalue()), base64.b64encode(png.getvalue()).decode()):
+        assert np.array_equal(decode(picture), frame)
+    for mode in ("L", "RGBA"):
+        other = io.BytesIO()
+        Image.fromarray(frame).convert(mode).save(other, format="PNG")
+        assert decode(other.getvalue()).shape == (48, 64, 3)
+
+
+def test_decode_returns_an_array_and_anything_else_unchanged():
+    frame = _frame(8, 8)
+    for value in (frame, None, 3, [1, 2]):
+        assert decode(value) is value
+
+
+def test_decode_opens_no_format_but_jpeg_and_png():
+    """Pillow opens many more, and a picture comes over the network."""
+    for fmt in ("GIF", "BMP", "TIFF"):
+        other = io.BytesIO()
+        Image.fromarray(_frame(8, 8)).save(other, format=fmt)
+        with pytest.raises(ValueError, match="not a JPEG or PNG image"):
+            decode(other.getvalue())
+    jpeg = base64.b64decode(encode(_smooth(64, 64)))
+    for bad in ("aGVsbG8gd29ybGQ=", "", b"", jpeg[: len(jpeg) // 2], "%%% not base64 %%%", "data:image/jpeg;base64"):
+        with pytest.raises(ValueError):
+            decode(bad)

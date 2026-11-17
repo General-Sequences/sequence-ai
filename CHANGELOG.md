@@ -3,6 +3,20 @@
 What changed in each release of `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
+## 0.62.1 — 2026-11-17
+
+A robot that runs openpi's own client against openpi's own server on a GPU of your own sends its pictures as JPEG,
+with one changed line on each side.
+
+### Added
+
+- `image_tools` from `sequence_ai.network.openpi`, imported on the robot in place of `openpi_client`'s, fits a frame as
+  openpi's `resize_with_pad` does and sends it as JPEG.
+- `python -m sequence_ai.network.openpi scripts/serve_policy.py`, or `openpi.patch()` in a server script of your own,
+  makes openpi's server ping each robot every 100 ms and decode its JPEG pictures.
+- A websockets server of your own does the same with `frames.decode`, which turns a JPEG or PNG picture into its array,
+  and `ping.serve`.
+
 ## 0.62.0 — 2026-11-17
 
 `sequence-ai` is open source and carries the components that make remote inference fast on any GPU, yours or one of

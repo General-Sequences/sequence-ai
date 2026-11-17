@@ -7,8 +7,9 @@ with its license.
 ## openpi
 
 - **Where:** `sequence_ai/network/frames.py`, `resize_image` with `mode="pad"`, and the reference it is compared with in
-  `tests/network/test_frames.py`.
-- **From:** `_resize_with_pad_pil` in `packages/openpi-client/src/openpi_client/image_tools.py` of
+  `tests/network/test_frames.py`; `sequence_ai/network/openpi.py`, `image_tools.convert_to_uint8` for an array.
+- **From:** `_resize_with_pad_pil` and `convert_to_uint8` in
+  `packages/openpi-client/src/openpi_client/image_tools.py` of
   [Physical-Intelligence/openpi](https://github.com/Physical-Intelligence/openpi).
 - **Why:** so that a frame resized here is, byte for byte, the frame openpi's own client sends.
 - **License:** Apache License, Version 2.0, the same as this project's [LICENSE](LICENSE).
@@ -35,3 +36,5 @@ No code is taken from these; a design or a format is followed.
   256 samples, one snapshot.
 - **msgpack-numpy** and **openpi**: `msgpack_io` writes numpy arrays in msgpack-numpy's layout and reads openpi's as
   well.
+- **openpi**: `openpi.image_tools` takes the names and arguments of openpi-client's `image_tools`, so that it can be
+  imported in its place.

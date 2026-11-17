@@ -7,7 +7,7 @@ usable on its own in your code.
 Client side (the robot):
     window          keeps the connection's send window through the robot's pauses: BBR, TCP keepalive, a ping when idle
     compress        compresses an observation's large arrays only where that saves more upload time than it costs
-    frames          resizes a camera frame to the size its policy takes, before upload
+    frames          resizes a camera frame to the size its policy takes, and encodes it as JPEG, before upload
     wifi_power      detects Wi-Fi power saving and reports how to disable it
 
 Server side (the GPU), for a uvicorn server:
@@ -15,7 +15,9 @@ Server side (the GPU), for a uvicorn server:
     tcp_link        reads each client's link from the kernel: RTT, retransmitted segments, congestion window
     compressed      decompresses what the robot compressed, byte for byte
 
-    ping            a server-side ping, so the robot's connection is never idle: the options to pass
+    ping            a server-side ping, so the robot's connection is never idle: the options to pass, or websockets'
+                    own server with them (ping.serve)
+    frames.decode   a picture the robot sent as JPEG, back into the array its policy reads
 
 Both sides:
     msgpack_io      observations and responses as msgpack, numpy arrays as their raw data; reads openpi's layout too
@@ -23,7 +25,9 @@ Both sides:
 
 Combined:
     connect         the client-side components on one connection to your own server (link.py)
-    openpi          the client-side components on the connection openpi's own client holds
+    openpi          openpi's own client and server with the components on them: the connection its client holds kept
+                    warm, pictures sent as JPEG (image_tools), and its server pinging each robot and decoding them
+                    (patch, or python -m sequence_ai.network.openpi with openpi's scripts/serve_policy.py)
 
 bench/ (beside this package) measures your own link, so you add what helps on it.
 """

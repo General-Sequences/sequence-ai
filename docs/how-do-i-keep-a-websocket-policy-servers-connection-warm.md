@@ -10,9 +10,16 @@ With the `websockets` library:
 import websockets
 from sequence_ai.network import ping
 
-async with websockets.serve(handler, host, port, **ping.websockets_options()):    # a ping every 100 ms
+async with ping.serve(handler, host, port) as server:      # websockets' own server, with a ping every 100 ms
+    await server.serve_forever()
+
+async with websockets.serve(handler, host, port, **ping.websockets_options()):    # the same, as its options
     ...
 ```
+
+openpi's own policy server is built on the `websockets` library. Started through `python -m sequence_ai.network.openpi`,
+it pings each connection the same way, with no change to its files:
+[How do I run π0 (openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md)
 
 Under uvicorn:
 
@@ -21,10 +28,11 @@ uvicorn.run(app, **ping.uvicorn_options())
 ```
 
 ```bash
-pip install sequence-ai          # this component imports only the standard library
+pip install sequence-ai          # this component imports only the standard library, and websockets for ping.serve
 ```
 
-The two calls return plain options, so you can also write them out and install nothing:
+`ping.websockets_options()` and `ping.uvicorn_options()` return plain options, so you can also write them out and
+install nothing:
 
 ```text
 ping.websockets_options()  ->  {'ping_interval': 0.1, 'ping_timeout': 20.0}

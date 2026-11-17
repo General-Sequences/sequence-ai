@@ -1,16 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 General Sequences Company
 # SPDX-License-Identifier: Apache-2.0
 """
-A camera frame resized on the robot to the size its policy takes, before upload, and encoded as JPEG.
+A camera frame resized on the robot to the size its policy takes, before upload, and encoded as JPEG; and on the
+server, turned back into the array its policy reads.
 
     from sequence_ai.network import frames
 
     frame = frames.resize_image(camera.read(), 224, 224, mode="pad", filter="bilinear")
     data = frames.encode(frame)        # a base64 JPEG, for an input that carries its frames as text
 
+    image = frames.decode(data)        # on the server: the HxWx3 uint8 array
+
 No function here changes a frame implicitly: `encode` sends the frame it is given, at its own size; `resize_image`
 resizes a frame the way a policy was trained to see it, with the mode and the filter passed explicitly and no default;
-`image_size` reads a frame's width and height from its header, without Pillow.
+`decode` returns the picture it is given at its own size; `image_size` reads a frame's width and height from its
+header, without Pillow.
 
 WHY on the robot: a frame resized before upload is a smaller upload, and the robot's code knows how its policy was
 trained.
@@ -30,18 +34,19 @@ from typing import Any
 
 # Quality 95: the value was measured, not chosen by convention.
 #
-# On a real DROID frame, with a pi0.5 policy's sampling noise fixed (required: the policy draws new noise on each
-# call, and without that two identical requests differ by 70 to 108% of action amplitude), JPEG encoding changes
-# the resulting action by:
-#     q95  0.51% of action amplitude
-#     q90  0.20%
-#     q85  1.86%
-#     q75  2.86%
-# Three runs agreed to the third decimal, against a determinism control that reproduced exactly. At quality 85
-# and below the error is several times larger.
+# On 50 real DROID observations (an exterior and a wrist camera, each fitted to 224 x 224), with a pi0.5 policy's
+# sampling noise fixed (required: the policy draws new noise on each call), JPEG encoding changes the resulting
+# action chunk - its mean |change| divided by its mean |action| - by, on average (median in brackets):
+#     q100   3.1%  (1.9%)
+#     q95    5.9%  (3.5%)
+#     q85   10.2%  (5.8%)
+#     q75   15.5%  (7.9%)
+# The change grows as the quality drops. New sampling noise alone, with no JPEG, changes the chunk by 64.5%: at
+# quality 95 JPEG moves the actions by about a tenth of what the policy's own sampling does.
 #
-# 95 and not 90, which measured best: the effect is not monotonic in quality on a single frame, and tuning to one
-# frame fits noise.
+# 95 and not 100: a little over half the bytes, for a change still about a tenth of the noise's. Not lower: below 95
+# the change keeps growing while the bytes saved shrink - the two cameras' JPEGs are 42.3 KB together at q100,
+# 23.6 KB at q95, 14.5 KB at q85 and 11.5 KB at q75, against 301 KB as arrays.
 DEFAULT_JPEG_QUALITY = 95
 
 
@@ -74,6 +79,49 @@ def encode(frame: Any, *, quality: int = DEFAULT_JPEG_QUALITY) -> str:
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=quality)
     return base64.b64encode(buf.getvalue()).decode()
+
+
+# What decode() opens. A picture comes over the network, so Pillow is not left to choose among all the formats it can
+# open: some of them hand the file to other programs.
+DECODED_FORMATS = ("JPEG", "PNG")
+
+
+def decode(picture: Any) -> Any:
+    """
+    A picture sent as JPEG or PNG, as the HxWx3 uint8 array its policy reads: the server's half of `encode`.
+
+        image = frames.decode(observation["image"])
+
+    `picture` is base64 text, as `encode` writes it (a data: URI is accepted), or the encoded bytes. Anything else, an
+    array included, is returned unchanged, so a server can pass every picture through this whether or not its robot
+    encoded it. The array holds the picture's RGB values at its own size, read-only (as msgpack_io reads an array); a
+    JPEG's values are close to those of the frame it was made from, not equal to them (DEFAULT_JPEG_QUALITY has how
+    close). Raises ValueError for text or bytes that are not a JPEG or PNG image.
+    """
+    if isinstance(picture, str):
+        text = picture.partition(",")[2] if picture.startswith("data:") else picture
+        try:
+            raw = base64.b64decode(text, validate=False)
+        except (binascii.Error, ValueError):
+            raise ValueError("not a JPEG or PNG image: text that is not base64") from None
+    elif isinstance(picture, (bytes, bytearray)):
+        raw = bytes(picture)
+    else:
+        return picture
+    try:
+        import numpy as np
+        from PIL import Image
+    except ImportError as e:  # pragma: no cover - depends on the install
+        raise ImportError("decoding a picture requires numpy and Pillow, one of which is missing or broken: "
+                          "pip install numpy pillow") from e
+
+    try:
+        with Image.open(io.BytesIO(raw), formats=DECODED_FORMATS) as img:
+            array = np.asarray(img if img.mode == "RGB" else img.convert("RGB"))
+    except (OSError, ValueError, Image.DecompressionBombError) as e:
+        raise ValueError("not a JPEG or PNG image that Pillow can read") from e
+    array.flags.writeable = False
+    return array
 
 
 # ── resizing a frame, and reading its size ────────────────────────────────────────────────────────────────────────────

@@ -145,6 +145,28 @@ which `kept.bbr` is true) both episodes matched the loss-free `keep()` episode.
 This is one link and two episodes per setting, and the client was a virtual machine whose packets the laptop forwards,
 not a robot's own Linux computer.
 
+## Pictures as JPEG with openpi's own server and client
+
+One closed-loop run with openpi's own policy server (the `pi05_droid` checkpoint, on an L4) and openpi's own client,
+the robot a simulated arm on a Mac on a home connection, two pictures of 224 x 224 in each request: first as arrays, as
+openpi's guide sends them, then as JPEG, each fitted and encoded as `openpi.image_tools` does it, with the server
+pinging each connection every 100 ms and decoding the pictures as `openpi.patch()` makes it do. Each row is one 45 s
+episode on the same GPU. "Outside the server" is the round trip the client measured minus the inference time the
+server reported; the RTT is a TCP echo to the GPU, measured during the episode.
+
+| Pictures | Upload per request | Outside the server, p50 (p95) | RTT, p50 | Frame to answer, p50 (p95) |
+|---|---|---|---|---|
+| Arrays | 301.5 KB | 153.8 (270.8) ms | 56.5 ms | 351.8 (468.0) ms |
+| JPEG, the server pinging | 18.8 KB | **58.1** (207.8) ms | 37.5 ms | 279.6 (429.6) ms |
+
+The link was faster during the second episode, so take its RTT out: the time outside the server beyond one RTT fell
+from about 97 ms to about 21 ms. The server took longer for each inference in the second episode, 219.7 against
+195.0 ms at the median, while the model's own time was the same (149.8 and 149.3 ms). That server was started through
+another script, as `python -m sequence_ai.network.openpi` starts it, and it was as slow with the pings and the decoding
+taken out: the difference is in how it was started, and its cause is not known.
+
+This is one link and one episode per setting, and the pings and the JPEG were not measured apart.
+
 ## From a Linux client on a home connection
 
 An upload over a WebSocket 0.5 s after the previous response, 16 per cell: the median in milliseconds and, in brackets,

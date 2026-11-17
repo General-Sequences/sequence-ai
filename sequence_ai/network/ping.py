@@ -6,7 +6,10 @@ A server-side ping, so that the robot's connection is never idle, with nothing c
     import websockets
     from sequence_ai.network import ping
 
-    async with websockets.serve(handler, host, port, **ping.websockets_options()):    # a ping every 100 ms
+    async with ping.serve(handler, host, port) as server:      # websockets' own server, with a ping every 100 ms
+        await server.serve_forever()
+
+    async with websockets.serve(handler, host, port, **ping.websockets_options()):    # the same, as its options
         ...
 
     uvicorn.run(app, **ping.uvicorn_options())                                         # the same, under uvicorn
@@ -34,9 +37,12 @@ link.
 What it cannot do: a server that answers one HTTP/1.1 request with one response cannot send anything unsolicited. There
 the ping must come from the robot: window.Warm, which sequence_ai.network.connect() puts on its connection.
 
-Standard library only: this gives each server the options it already takes.
+Standard library only: this gives each server the options it already takes, and serve() imports websockets when it is
+called.
 """
 from __future__ import annotations
+
+from typing import Any
 
 EVERY_S = 0.1          # interval between two pings
 TIMEOUT_S = 20.0       # how long a pong may take before the server drops a connection: slow is not dead
@@ -52,6 +58,20 @@ def websockets_options(every_s: float = EVERY_S, timeout_s: float = TIMEOUT_S) -
     """The options `websockets.serve(handler, host, port, **these)` takes to ping each connection every `every_s`."""
     every_s, timeout_s = _checked(every_s, timeout_s)
     return {"ping_interval": every_s, "ping_timeout": timeout_s}
+
+
+def serve(handler: Any, host: Any = None, port: Any = None, *, every_s: float = EVERY_S, timeout_s: float = TIMEOUT_S,
+          **options: Any) -> Any:
+    """`websockets.asyncio.server.serve(handler, host, port, **options)`, with each connection pinged every `every_s`:
+    the same server, used the same way (`async with ping.serve(...) as server:`). An option passed in `options` is used
+    in place of this function's own (`ping_interval`, `ping_timeout`). Requires the websockets library, version 14 or
+    later."""
+    try:
+        from websockets.asyncio.server import serve as _serve
+    except ImportError as e:
+        raise ImportError("ping.serve() runs websockets' own server, version 14 or later: "
+                          "pip install websockets") from e
+    return _serve(handler, host, port, **{**websockets_options(every_s, timeout_s), **options})
 
 
 def uvicorn_options(every_s: float = EVERY_S, timeout_s: float = TIMEOUT_S) -> dict:

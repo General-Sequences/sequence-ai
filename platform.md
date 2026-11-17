@@ -391,19 +391,18 @@ worker agreed: 181 ms for the same 11.2 kB.
 frame as JPEG 11.6 kB (below) - and it is the most common way to land on the slow side of that table.
 `sequence_ai.Video(frame)` sends a camera's frames as low-latency video (`pip install "sequence-ai[observe]"`).
 
-**Use quality 95. Do not go below 90.** With the sampling noise pinned, on a real DROID frame:
+**Use quality 95.** With the sampling noise pinned, over 50 real DROID observations (an exterior and a wrist camera,
+each 224x224), JPEG moved a π0.5 policy's action chunk (its mean \|Δ action\| over its mean \|action\|) by:
 
-| quality | max\|Δ action\| | share of action amplitude |
-|---|---|---|
-| 95 | 0.0048 | 0.51% |
-| 90 | 0.0019 | 0.20% |
-| 85 | 0.0177 | **1.86%** |
-| 75 | 0.0269 | 2.86% |
+| quality | mean change | median change | the two cameras' JPEGs |
+|---|---|---|---|
+| 100 | 3.1% | 1.9% | 42.3 kB |
+| 95 | 5.9% | 3.5% | 23.6 kB |
+| 85 | 10.2% | 5.8% | 14.5 kB |
+| 75 | 15.5% | 7.9% | 11.5 kB |
 
-Quality 85 and below is where the error jumps by an order of magnitude. This section previously
-read "quality 85 is safe" and quoted the 0.51% figure next to it — but 0.51% is **q95's** number,
-and q85 is nearly four times worse. `sequence_ai.encode()` defaults to 95 so the decision is not
-yours to get wrong.
+The change grows as the quality drops. New sampling noise alone, with no JPEG, moves the chunk by 64.5%, so at 95 JPEG
+moves the actions by about a tenth of what the policy's own sampling does. `sequence_ai.encode()` defaults to 95.
 
 ### Fit each frame on the robot, the way the policy was trained
 

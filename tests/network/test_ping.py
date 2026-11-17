@@ -60,7 +60,7 @@ def test_the_options_are_those_each_server_accepts_and_a_bad_interval_is_refused
 
 
 @contextlib.contextmanager
-def _websockets_server(**options):
+def _websockets_server(serve=None, **options):
     websockets = pytest.importorskip("websockets")
     ready, box = threading.Event(), {}
 
@@ -71,7 +71,7 @@ def _websockets_server(**options):
 
     async def main():
         box["stop"] = asyncio.get_running_loop().create_future()
-        async with websockets.serve(handler, "127.0.0.1", 0, **options) as server:
+        async with (serve or websockets.serve)(handler, "127.0.0.1", 0, **options) as server:
             box["port"], box["loop"] = server.sockets[0].getsockname()[1], asyncio.get_running_loop()
             ready.set()
             await box["stop"]
@@ -91,6 +91,15 @@ def test_a_websockets_server_with_the_options_pings_every_interval_and_one_witho
         assert _pings_in(port, 0.6) >= 6
     with _websockets_server() as port:
         assert _pings_in(port, 0.4) == 0                      # the library's default interval is 20 s
+
+
+def test_serve_is_websockets_own_server_pinging_every_interval_and_an_option_passed_wins():
+    with _websockets_server(ping.serve, every_s=0.05) as port:
+        assert _pings_in(port, 0.6) >= 6
+    with _websockets_server(ping.serve, ping_interval=None) as port:
+        assert _pings_in(port, 0.4) == 0                      # the caller's own option: no pings
+    with pytest.raises(ValueError):
+        ping.serve(None, "127.0.0.1", 0, every_s=0)
 
 
 @pytest.mark.parametrize("implementation", ["auto", "websockets-sansio", "websockets"])

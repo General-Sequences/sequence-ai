@@ -18,7 +18,8 @@ async def handler(ws):
 
 
 async def main():
-    async with websockets.serve(handler, "127.0.0.1", 0, **ping.websockets_options()) as server:
+    async with ping.serve(handler, "127.0.0.1", 0) as server:                  # websockets' own server, pinging
+        # the same as websockets.serve(handler, "127.0.0.1", 0, **ping.websockets_options())
         port = server.sockets[0].getsockname()[1]
         async with websockets.connect(f"ws://127.0.0.1:{port}") as robot:       # any client: its library answers pings
             await robot.send("observation")
