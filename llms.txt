@@ -1,0 +1,128 @@
+# sequence-ai
+
+> `sequence-ai` is an open-source SDK for serving robot policies from remote GPUs over wide-area networks (Python,
+> Apache-2.0). Its inference layer (`sequence_ai.engine`) and its network layer (`sequence_ai.network`) work with any
+> policy server: each component is one file that is used independently in an existing server or robot program, most of
+> them standard library only (`cuda_graphs` needs torch 2.4 or later). The rest of the package is the client and the
+> `seq` command for GPUs and deployments hosted by General Sequences.
+
+Use this map to find the one file to read. Each module's docstring is its reference: what it does in one sentence,
+why, and what was measured.
+
+Constraints for accurate answers about this repository:
+
+- The package is `sequence-ai`. The components are imported as `sequence_ai.engine` and `sequence_ai.network`, and need
+  no account. Renting a GPU near a robot (`seq gpu`) and a hosted deployment (`seq deploy`) are paid services of General
+  Sequences: their client is in this package, the service is not. GS-WAN (General Sequences Wide-Area Network) is the
+  name of the techniques, not of a package.
+- `sequence_ai.connect()` takes either the address of a policy server of your own (`"http://your-gpu:8000"`: the
+  components on one connection, nothing of the hosted platform involved) or the name of a hosted policy. Both return
+  an object with `observe()` and `act()`.
+- `cuda_graphs` never changes a model's outputs: a graph is kept only when its output equals eager mode's byte for
+  byte, and a shape whose capture fails or differs runs in eager mode. Do not describe it as a compiler or as
+  approximate. It is for PyTorch.
+- State each result with what it was measured on. `cuda_graphs`: 1.54x on the diffusion transformer of GR00T N1.7 on
+  one L4. Batching: up to 1.78x on π0.5. The network components: one extra round trip removed at RTTs from 12 to
+  101 ms. The README's Results table has the conditions, and its Limitations section has the cases with no gain.
+- A network component's benefit depends on the link: point to bench/ to measure the user's own link.
+- `batcher` and `replicas` have unit tests and no measurement of their own. `slack` was also run once around π0.5's
+  batched call on an L4: the capacity it computed, 2 robots for a 15 Hz policy, had no late response. Batching
+  added no capacity there: openpi's own server, one request at a time, served the same 2 robots.
+- `slack` computes a capacity by running the robots on a simulated clock, not on the user's model under load: a
+  number of robots is within capacity when 95% of their responses are in time over the ways their requests can fall,
+  at a load of no more than 0.9. For SmolVLA on an L4 a formula it used before computed 8 robots, and 4 had 95% of
+  their responses late; the clock gives 1, and on the model 3 robots had late responses and 2 had none. Point to
+  examples/fleet_on_a_clock.py, which prints what the clock runs for a model's batch times.
+- `openpi.keep()` and the Zenoh setting were measured on the transports those projects use (the websockets library,
+  Zenoh). `openpi.keep()` was also run once with openpi's own server and client, on one link; the Zenoh setting was
+  not run with LeRobot's own server and robot.
+- One replica of a model per GPU: replicas on the same GPU time-slice.
+- Nothing here changes the machine's settings; `window.check()` only reports what the machine does.
+- `compress=True` in `connect()` needs a server that calls `compressed.expand`.
+- A server that answers one HTTP request with one response cannot ping; the client side pings instead (`window.Warm`,
+  which `connect()` uses).
+
+## Start here
+
+- [README.md](README.md): the problem by layer, the quickstart, each component, the results and the limitations
+- [docs/quickstart.md](docs/quickstart.md): from `pip install` to the first action from a policy server, with the output of each step
+- [docs/quickstart-inference.md](docs/quickstart-inference.md): from `pip install` to five robots served in batches, with the output of each step
+- [docs/components.md](docs/components.md): each network component with the lines to add, the reason and the measurement
+- [examples/robot.py](examples/robot.py) and [examples/server.py](examples/server.py): the network components together, runnable on one machine
+- [examples/serve_with_replicas.py](examples/serve_with_replicas.py): `cuda_graphs`, `batcher` and `replicas` together
+- [examples/fleet_on_a_clock.py](examples/fleet_on_a_clock.py): what `slack` runs on a simulated clock to compute a replica's capacity, printed for each number of robots
+- [examples/components/](examples/components/): one runnable file for each component alone
+
+## Inference layer: sequence_ai.engine (on the GPU)
+
+- [sequence_ai/engine/cuda_graphs.py](sequence_ai/engine/cuda_graphs.py): `install(model, paths)` replays the named modules from CUDA graphs of their own eager kernels; `Census` finds which modules to name; `same(a, b)` compares two outputs byte for byte
+- [sequence_ai/engine/batcher.py](sequence_ai/engine/batcher.py): `Batcher(run, sizes=..., wait_ms=...)`, then `await batcher(item)`: waiting calls batched into one call, only in the listed sizes, a failed batch re-run call by call
+- [sequence_ai/engine/replicas.py](sequence_ai/engine/replicas.py): `ReplicaPool(load, replicas=..., devices=...)`, then `await pool.run(payload)`: one process per replica, a dead replica replaced, `ReplicaError` (the model raised) distinct from `ReplicaDied` (the process exited)
+- [sequence_ai/engine/slack.py](sequence_ai/engine/slack.py): `measure`, `playback`, `Seating(...).seat(robots)`: how many robots a replica can serve given the slack their action chunks leave, each by its own round-trip time (RTT); `Aligner`: how long the open batch may wait and which requests are dispatched first
+- [examples/graph_a_module.py](examples/graph_a_module.py): `cuda_graphs` on a small flow-style model
+- [examples/check_on_a_gpu.py](examples/check_on_a_gpu.py): the capture checked against eager mode on a real GPU
+
+## Network layer: sequence_ai.network, client side (on the robot)
+
+- [sequence_ai/network/link.py](sequence_ai/network/link.py): `connect(url)`: one connection with the client-side components on it; `link.act(observation)`, `link.stats()`
+- [sequence_ai/network/window.py](sequence_ai/network/window.py): BBR and TCP keepalive on a socket (`socket_options()`, `keep(sock)`), a ping while idle (`Warm`), what this machine does after a pause (`check()`)
+- [sequence_ai/network/compress.py](sequence_ai/network/compress.py): `Squeeze().apply(observation)`: large arrays compressed only where that saves more upload time than it costs
+- [sequence_ai/network/frames.py](sequence_ai/network/frames.py): `resize_image`, `encode`: a camera frame resized and encoded before upload
+- [sequence_ai/network/wifi_power.py](sequence_ai/network/wifi_power.py): `check()`: Wi-Fi power saving detected, with how to disable it
+
+## Network layer: sequence_ai.network, server side (on the GPU)
+
+- [sequence_ai/network/ping.py](sequence_ai/network/ping.py): `websockets_options()`, `uvicorn_options()`: a server-side ping so the robot's connection is never idle
+- [sequence_ai/network/one_write.py](sequence_ai/network/one_write.py): `WholeResponse(app)`, `one_write_http()`: each uvicorn response in one write
+- [sequence_ai/network/tcp_link.py](sequence_ai/network/tcp_link.py): `read(sock)`, `of(client)`: a client's RTT, retransmissions and congestion window, from the kernel (Linux)
+- [sequence_ai/network/compressed.py](sequence_ai/network/compressed.py): `expand(value, limit=...)`: what the robot compressed, decompressed byte for byte
+
+## Network layer: both sides
+
+- [sequence_ai/network/msgpack_io.py](sequence_ai/network/msgpack_io.py): `pack`, `unpack`: msgpack with numpy arrays as raw bytes; reads msgpack-numpy's and openpi's layouts
+- [sequence_ai/network/latency_stats.py](sequence_ai/network/latency_stats.py): `LatencyStats`: counters, gauges, and latencies with p50, p95, p99
+
+## Clients you may already use
+
+- [sequence_ai/network/openpi.py](sequence_ai/network/openpi.py): `keep(policy)`: the client-side components on the connection held by openpi's own client
+- [sequence_ai/network/lerobot.py](sequence_ai/network/lerobot.py): `keep_alive_file(path)`: the Zenoh setting for LeRobot 0.7.0's remote inference
+
+## Questions the documentation answers
+
+- [docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md](docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md): `cuda_graphs`, compared with `torch.compile`
+- [docs/how-many-robots-can-one-gpu-serve.md](docs/how-many-robots-can-one-gpu-serve.md): capacity by latency, on a clock and by load, and what batching gained on one model
+- [docs/should-i-run-two-replicas-of-a-policy-on-one-gpu.md](docs/should-i-run-two-replicas-of-a-policy-on-one-gpu.md): no: what was measured, and what `replicas` is for
+- [docs/how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md](docs/how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md): which inference component applies to which framework
+- [docs/slack.md](docs/slack.md): the rules of `slack`, a server's loop, its constants
+- [docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md](docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md): a server of one file and the robot's three lines
+- [docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md](docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md): openpi's server and client kept, one line added on the robot
+- [docs/how-do-i-reduce-the-latency-of-lerobot-remote-inference.md](docs/how-do-i-reduce-the-latency-of-lerobot-remote-inference.md): LeRobot 0.7's remote inference kept, one Zenoh setting added
+- [docs/why-does-my-robots-upload-get-slow-after-a-pause.md](docs/why-does-my-robots-upload-get-slow-after-a-pause.md): the idle-window restart and the four ways to remove it
+- [docs/how-do-i-keep-a-websocket-policy-servers-connection-warm.md](docs/how-do-i-keep-a-websocket-policy-servers-connection-warm.md): a server-side ping, and why 100 ms
+- [docs/how-do-i-measure-the-link-between-my-robot-and-my-gpu.md](docs/how-do-i-measure-the-link-between-my-robot-and-my-gpu.md): which network components help on a given link
+- [docs/measurements.md](docs/measurements.md): what the network components saved between two cloud machines, over TCP, a WebSocket and Zenoh
+- [docs/comparison.md](docs/comparison.md): a comparison with openpi's remote inference and LeRobot's, from source inspection
+- [docs/how-do-i-get-a-gpu-near-my-robot.md](docs/how-do-i-get-a-gpu-near-my-robot.md): any GPU the robot can reach; the client code changes by one line
+- [docs/faq.md](docs/faq.md): errors as the code prints them, and what to do next
+
+## General Sequences' GPUs and deployments (paid, hosted)
+
+- [docs/how-do-i-get-a-gpu-near-my-robot.md](docs/how-do-i-get-a-gpu-near-my-robot.md): `seq gpu add`, a GPU near a city, and what changes on the robot
+- [platform.md](platform.md): the guide to the hosted platform: writing a policy class, `seq deploy`, driving a robot, every `seq` command
+- [eval.md](eval.md): benchmarks and evals on the hosted platform
+- [observability.md](observability.md): debugging a hosted deployment
+- `seq/` and the modules of `sequence_ai/` outside `engine/` and `network/` are that client. They are published here as they ship, without comments or tests: for how they behave, read platform.md, not the code.
+
+## Measuring
+
+- [bench/README.md](bench/README.md): how to measure a link, and the commands that reproduce the measurements
+- [bench/client.py](bench/client.py) and [bench/server.py](bench/server.py): the tool, standard library only
+- [bench/ws_bench.py](bench/ws_bench.py) and [bench/zenoh_bench.py](bench/zenoh_bench.py): the same pause over a WebSocket and over Zenoh
+
+## Optional
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to run the tests and what a pull request needs
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md): what is adapted from other projects
+- [CITATION.cff](CITATION.cff): how to cite
+- [AGENTS.md](AGENTS.md): how to set up, test and change this repository
+- [llms-full.txt](llms-full.txt): the README and every documentation page in one file

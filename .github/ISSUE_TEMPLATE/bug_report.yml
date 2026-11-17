@@ -1,0 +1,31 @@
+name: Bug report
+description: Something does not work as the README or a docstring says it does.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what you got. Paste the error and its traceback as they were printed.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to see it again
+      description: The smallest script or command that shows it.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release, or the commit (`git rev-parse --short HEAD`).
+    validations:
+      required: true
+  - type: textarea
+    id: where
+    attributes:
+      label: Where it ran
+      description: Operating system and kernel, Python, the GPU and its driver, PyTorch and CUDA if they matter here.

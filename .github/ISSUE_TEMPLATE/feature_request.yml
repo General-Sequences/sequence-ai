@@ -1,0 +1,18 @@
+name: Proposal
+description: A change in what this project does.
+labels: ["proposal"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and where it gets in the way today. A measurement helps.
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: The change you have in mind
+      description: What it would look like from the outside. Say what else you considered.
+    validations:
+      required: true

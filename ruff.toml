@@ -1,0 +1,8 @@
+# The lint of the components and what goes out beside them:
+#   ruff check sequence_ai/engine sequence_ai/network tests examples bench tools
+line-length = 120
+target-version = "py39"
+
+[lint]
+# errors, pyflakes, warnings, import order, likely bugs
+select = ["E", "F", "W", "I", "B"]
