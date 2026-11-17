@@ -27,9 +27,9 @@ or, in a server script of your own, one line before it makes openpi's server:
 
 In one sentence: keep() takes the WebSocket connection the client opened → requests BBR on its socket and enables TCP
 keepalive (window.keep, window.keepalive_options), each where this machine allows it → pings the connection after each
-`every_s` of idle time and waits for the pong (window.Warm), so the robot's kernel never counts it idle and a dead
-connection is detected before the next observation is sent on it → marks each infer() as a use. image_tools fits a
-frame as openpi's resize_with_pad does and returns it as base64 JPEG (frames.resize_image, frames.encode) → patch()
+`every_s` of idle time and waits for the pong (window.Warm), so a dead connection is detected before the next
+observation is sent on it → marks each infer() as a use. image_tools fits a frame as openpi's resize_with_pad does and
+returns it as base64 JPEG (frames.resize_image, frames.encode) → patch()
 makes openpi's server ping each connection every 100 ms (ping.websockets_options) and hands the policy it is given to
 Pictures, whose infer() turns each picture back into the array the policy reads (frames.decode).
 
@@ -53,8 +53,14 @@ connection, one 45 s episode each), the pictures as JPEG and the server's pings 
 each request's upload went from 301.5 KB to 18.8 KB, and the time it spent outside the server from a median of 153.8
 to 58.1 ms, over RTTs of 56.5 and 37.5 ms. In that run the server, started through another script as `python -m`
 starts it, took about 20 ms longer for each inference than openpi's own launch of the same script did, with or without
-the pings and the decoding; why is not known. bench/ measures your link, and window.py documents where the same
-mechanism helped and where it did not.
+the pings and the decoding; why is not known. openpi's server answers no ping while it runs inference, so the robot's
+ping waits for the answer and the robot can stay silent longer than a retransmission timeout: from Linux robots 30 and
+75 ms from the server (CUBIC, no BBR, 301 KB per request, six 45 s episodes each), the window before a request was half
+the one after the previous upload for 373 of 482 and 270 of 477 requests with keep(), against 3 of 429 and 3 of 477
+without it. The 301 KB upload still fitted in the 215 packets left in most requests, so at 30 ms keep() still cut the
+time outside inference from 91.2 to 37.1 ms (at 75 ms it was 86.7 ms without and 100.5 ms with it); a larger upload
+would not have fitted. BBR on the robot avoids the restart (window.py).
+bench/ measures your link, and window.py documents where the same mechanism helped and where it did not.
 
 keep() reads the client's `_ws`, the connection it keeps, and patch() the server module's `_server` and
 WebsocketPolicyServer: a client or a server built otherwise (another version, another transport) raises TypeError

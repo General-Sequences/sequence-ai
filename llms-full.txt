@@ -2187,8 +2187,10 @@ A robot that executes an action chunk before requesting the next one leaves its 
 Linux, a connection silent for longer than its retransmission timeout has its congestion window restarted, so the
 next observation can take more round trips to upload.
 [Why does my robot's upload get slow after a pause?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/why-does-my-robots-upload-get-slow-after-a-pause.md) has the
-mechanism and the links where it did and did not cost anything. The server's pings and `keep()`'s each keep the
-connection from going silent. JPEG makes the upload itself smaller: two 224 x 224 pictures are 301,056 bytes as arrays.
+mechanism and the links where it did and did not cost anything. The pings keep the connection from going silent while
+the server can answer them; openpi's server answers none while it runs inference, so on a Linux robot without BBR the
+window can still be halved once before each upload ([measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md)). BBR on the robot avoids that.
+JPEG makes the upload itself smaller: two 224 x 224 pictures are 301,056 bytes as arrays.
 
 `kept.bbr` reports whether the socket accepted BBR, `kept.congestion` which congestion control it now uses, and
 `kept.warm.pings` how many pings were answered. `kept.close()` stops the pings; the connection stays openpi's.
@@ -2893,13 +2895,34 @@ of about 240 to 270 ms. Each request uploaded 301 KB, and each row is one 45 s e
 | `openpi.keep()`, BBR module loaded | 90.6 (136.3) ms | 78 ms | 2 of 90 | 25 |
 
 Without `keep()` the connection was idle for longer than its retransmission timeout before almost every request, and
-the kernel reduced the congestion window before the upload. With `keep()` the pings held the idle time under 100 ms and
-the window was not reduced. The second `keep()` episode lost packets (48 retransmissions) and its median was no better
+the kernel reduced the congestion window before the upload. With `keep()` the idle time just before each request was
+under 100 ms, and the window fell during 0 to 4 uploads in an episode. Neither measure sees a cut made earlier, at the
+robot's first ping after the answer: openpi's server answers no ping while it runs inference, so the robot's ping waits,
+and the robot can go longer than a retransmission timeout without sending (below). The second `keep()` episode lost
+packets (48 retransmissions) and its median was no better
 than without `keep()`: a ping does not help against loss. With the BBR module loaded (`sudo modprobe tcp_bbr`, after
 which `kept.bbr` is true) both episodes matched the loss-free `keep()` episode.
 
 This is one link and two episodes per setting, and the client was a virtual machine whose packets the laptop forwards,
 not a robot's own Linux computer.
+
+A later run counted where the window is cut. Two Linux cloud machines ran openpi's own client (CUBIC, no BBR), 30 and
+75 ms from openpi's own server (the `pi05_droid` checkpoint, on an L4), each six 45 s episodes with and without
+`keep()`, 301 KB per request. "Halved before the request" counts the requests whose window just before the request was
+half the window after the previous upload: Linux cut it at a send in between, the robot's first ping after a silence
+longer than its retransmission timeout.
+
+| Robot | `keep()` | Halved before the request | Window left, p50 (packets) | Outside inference, p50 |
+|---|---|---|---|---|
+| 30 ms away | no | 3 of 429 | 72 | 91.2 ms |
+| 30 ms away | yes | 373 of 482 | 215 | 37.1 ms |
+| 75 ms away | no | 3 of 477 | 215 | 86.7 ms |
+| 75 ms away | yes | 270 of 477 | 216 | 100.5 ms |
+
+Without `keep()` the window was cut at the request itself, twice at 30 ms (286 to 72 packets). With `keep()` it was cut
+once, earlier, and the 301 KB upload (209 packets) still fitted in the 215 left in most requests (79% at 30 ms, all at
+75 ms); a larger one would not have. BBR on the robot avoids the restart
+([`window.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/window.py)).
 
 ## Pictures as JPEG with openpi's own server and client
 

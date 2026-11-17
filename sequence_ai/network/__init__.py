@@ -6,6 +6,7 @@ usable on its own in your code.
 
 Client side (the robot):
     window          keeps the connection's send window through the robot's pauses: BBR, TCP keepalive, a ping when idle
+                    (where the server answers it)
     compress        compresses an observation's large arrays only where that saves more upload time than it costs
     frames          resizes a camera frame to the size its policy takes, and encodes it as JPEG, before upload
     wifi_power      detects Wi-Fi power saving and reports how to disable it
@@ -15,8 +16,8 @@ Server side (the GPU), for a uvicorn server:
     tcp_link        reads each client's link from the kernel: RTT, retransmitted segments, congestion window
     compressed      decompresses what the robot compressed, byte for byte
 
-    ping            a server-side ping, so the robot's connection is never idle: the options to pass, or websockets'
-                    own server with them (ping.serve)
+    ping            a server-side ping, so the robot's connection is not left idle while the server's event loop
+                    is free: the options to pass, or websockets' own server with them (ping.serve)
     frames.decode   a picture the robot sent as JPEG, back into the array its policy reads
 
 Both sides:

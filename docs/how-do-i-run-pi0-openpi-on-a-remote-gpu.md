@@ -48,8 +48,10 @@ A robot that executes an action chunk before requesting the next one leaves its 
 Linux, a connection silent for longer than its retransmission timeout has its congestion window restarted, so the
 next observation can take more round trips to upload.
 [Why does my robot's upload get slow after a pause?](why-does-my-robots-upload-get-slow-after-a-pause.md) has the
-mechanism and the links where it did and did not cost anything. The server's pings and `keep()`'s each keep the
-connection from going silent. JPEG makes the upload itself smaller: two 224 x 224 pictures are 301,056 bytes as arrays.
+mechanism and the links where it did and did not cost anything. The pings keep the connection from going silent while
+the server can answer them; openpi's server answers none while it runs inference, so on a Linux robot without BBR the
+window can still be halved once before each upload ([measurements](measurements.md)). BBR on the robot avoids that.
+JPEG makes the upload itself smaller: two 224 x 224 pictures are 301,056 bytes as arrays.
 
 `kept.bbr` reports whether the socket accepted BBR, `kept.congestion` which congestion control it now uses, and
 `kept.warm.pings` how many pings were answered. `kept.close()` stops the pings; the connection stays openpi's.

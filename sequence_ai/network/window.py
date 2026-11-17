@@ -29,13 +29,15 @@ s, an RTT of about 21 ms: 40 of 40 requests took one more round trip without it 
 After every `every_s` in which the robot sent nothing, a ping is sent on its connection, for `for_s` after its last
 send: a large observation after a pause is then uploaded like one sent right after another. What it keeps: the machine's
 Wi-Fi radio awake (asleep, the responses to an upload's first round trips wait at the access point for its next beacon);
-a connection never idle past a retransmission timeout, after which Linux restarts its window from 10 packets (RFC 5681
-4.1); and a dead connection detected by the ping's deadline before the robot's next send uses it. What it cannot keep:
-Linux shrinks a window the pings do not fill (RFC 2861, tcp_output.c tcp_cwnd_validate); BBR or
-tcp_slow_start_after_idle=0 keeps that one. macOS keeps its window for three minutes of idle time regardless. Measured:
-at an RTT of 226 ms, 162 KB uploads 3 s apart on one pinged connection took 303.6 ms to arrive without the pings and
-under 1 ms with them; from 85 ms away, 2.36 MB after a 2 s pause took a median 504 ms without, 421 ms with a ping every
-100 ms, and 396 ms sent immediately: three of each, too few to be sure of the last.
+a connection never idle past a retransmission timeout while its far end answers the pings (past one, Linux restarts its
+window, RFC 5681 4.1); and a dead connection detected by the ping's deadline before the robot's next send uses it. What
+it cannot keep: Linux shrinks a window the pings do not fill (RFC 2861, tcp_output.c tcp_cwnd_validate); BBR or
+tcp_slow_start_after_idle=0 keeps that one. Each ping waits for its pong, so a server that answers none while it works
+leaves the robot silent until it does: with openpi's own server, during inference, Linux halved the window once before
+most uploads (openpi.py has the measurement). macOS keeps its window for three minutes of idle time regardless.
+Measured: at an RTT of 226 ms, 162 KB uploads 3 s apart on one pinged connection took 303.6 ms to arrive without the
+pings and under 1 ms with them; from 85 ms away, 2.36 MB after a 2 s pause took a median 504 ms without, 421 ms with a
+ping every 100 ms, and 396 ms sent immediately: three of each, too few to be sure of the last.
 
 ── a connection that died between uses: TCP keepalive ──
 The machine probes the far end once the connection has been idle, then at an interval, and drops it after a few probes

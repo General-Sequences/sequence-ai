@@ -3,6 +3,19 @@
 What changed in each release of `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
+## 0.62.2 — 2026-11-17
+
+The documentation now says what `openpi.keep()` does with openpi's own server: its pings wait while the server runs
+inference, so on Linux without BBR the window can still be halved.
+
+### Fixed
+
+- `openpi.keep()`'s and `window.Warm`'s docstrings no longer say a pinged connection is never idle: a server that
+  answers no ping while it works leaves it silent.
+- `docs/measurements.md` adds a run that counts where the window is cut: with `keep()`, openpi's server and no BBR,
+  Linux halved it before most requests.
+- The openpi how-to says that BBR on the robot keeps the window where openpi's server cannot answer the pings.
+
 ## 0.62.1 — 2026-11-17
 
 A robot that runs openpi's own client against openpi's own server on a GPU of your own sends its pictures as JPEG,
