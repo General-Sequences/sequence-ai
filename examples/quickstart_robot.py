@@ -3,7 +3,7 @@
 """
 Quickstart, client side: the first action from a policy server, in three lines of sequence-ai.
 
-    pip install "sequence-ai[arrays]"
+    pip install sequence-ai
     python quickstart_robot.py                           # against examples/quickstart_server.py on this machine
     python quickstart_robot.py http://YOUR_GPU:8000      # against the same server on your GPU
 

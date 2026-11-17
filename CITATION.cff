@@ -1,11 +1,11 @@
 cff-version: 1.2.0
 message: "If you use sequence-ai in research, please cite it as below."
 title: "sequence-ai"
-abstract: "An open-source SDK for serving robot policies from remote GPUs over wide-area networks: an inference layer and a network layer, each component usable on its own, and the client for GPUs hosted by General Sequences."
+abstract: "An open-source framework for serving robot policies from remote GPUs over wide-area networks: an inference layer and a network layer, each component usable on its own, and the client for GPUs hosted by General Sequences."
 type: software
 authors:
   - name: "General Sequences"
 license: Apache-2.0
 repository-code: "https://github.com/General-Sequences/sequence-ai"
 url: "https://generalsequences.com"
-version: 0.62.2
+version: 0.62.3

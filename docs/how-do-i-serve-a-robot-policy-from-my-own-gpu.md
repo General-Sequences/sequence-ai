@@ -6,7 +6,7 @@ open source and runs on a GPU you already have: no account and no service of our
 On the GPU:
 
 ```bash
-pip install "sequence-ai[server,arrays]"
+pip install sequence-ai
 python quickstart_server.py 0.0.0.0 8000
 ```
 

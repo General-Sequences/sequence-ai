@@ -1,6 +1,6 @@
 # sequence-ai
 
-> `sequence-ai` is an open-source SDK for serving robot policies from remote GPUs over wide-area networks (Python,
+> `sequence-ai` is an open-source framework for serving robot policies from remote GPUs over wide-area networks (Python,
 > Apache-2.0). Its inference layer (`sequence_ai.engine`) and its network layer (`sequence_ai.network`) work with any
 > policy server: each component is one file that is used independently in an existing server or robot program, most of
 > them standard library only (`cuda_graphs` needs torch 2.4 or later). The rest of the package is the client and the

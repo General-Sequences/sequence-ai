@@ -125,7 +125,7 @@ def one_write_http() -> type[asyncio.Protocol]:
         from uvicorn.protocols.http.auto import AutoHTTPProtocol
     except ImportError as missing:
         raise ImportError("one_write_http() wraps uvicorn's HTTP protocol, and uvicorn is not installed: "
-                          'pip install "sequence-ai[server]"') from missing
+                          'pip install uvicorn') from missing
 
     from sequence_ai.network import tcp_link
 

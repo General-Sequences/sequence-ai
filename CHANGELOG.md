@@ -3,6 +3,19 @@
 What changed in each release of `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
+## 0.62.3 — 2026-11-17
+
+`pip install sequence-ai` now installs everything the quick start needs, and `sequence-ai` is called an open-source
+framework.
+
+### Changed
+
+- `pip install sequence-ai` installs uvicorn, numpy and zstandard too: the `server` and `arrays` extras are gone, and
+  naming them only draws pip's warning.
+- The README, its banner and the citation call `sequence-ai` an open-source framework, not an SDK.
+- The README's results fit in short tables, and its limitations are five plain points, with every number in
+  `docs/measurements.md`.
+
 ## 0.62.2 — 2026-11-17
 
 The documentation now says what `openpi.keep()` does with openpi's own server: its pings wait while the server runs

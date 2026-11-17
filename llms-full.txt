@@ -1,6 +1,6 @@
 # sequence-ai
 
-> `sequence-ai` is an open-source SDK for serving robot policies from remote GPUs over wide-area networks (Python,
+> `sequence-ai` is an open-source framework for serving robot policies from remote GPUs over wide-area networks (Python,
 > Apache-2.0). Its inference layer (`sequence_ai.engine`) and its network layer (`sequence_ai.network`) work with any
 > policy server: each component is one file that is used independently in an existing server or robot program, most of
 > them standard library only (`cuda_graphs` needs torch 2.4 or later). The rest of the package is the client and the
@@ -13,7 +13,7 @@ The map of the repository, file by file, is https://github.com/General-Sequences
 
 Source: https://github.com/General-Sequences/sequence-ai/blob/main/README.md
 
-`sequence-ai` is an open-source SDK for serving robot policies from remote GPUs over wide-area networks (WANs). It
+`sequence-ai` is an open-source framework for serving robot policies from remote GPUs over wide-area networks (WANs). It
 supports all open-source robot policies. It runs on your own GPU, or on one rented from
 [General Sequences](https://generalsequences.com) near your robot: on the robot, only what `connect()` is given changes.
 
@@ -26,8 +26,7 @@ Wide-Area Network). Each component is one file that can be added to existing cod
 ## Install
 
 ```bash
-pip install sequence-ai                          # the robot's client, the seq command, every component
-pip install "sequence-ai[server,arrays]"         # and uvicorn, numpy, zstandard: the quick start's server
+pip install sequence-ai      # the robot's client, the seq command, every component and the quick start's server
 ```
 
 Python 3.9 or later for the client and the components, on Linux and macOS; the `seq` command needs Python 3.10 or
@@ -204,7 +203,7 @@ seats_user, over_user = seating_user.seat([("near", 30.0), ("far", 200.0)])     
 | [`one_write`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/one_write.py) | server | Sends each HTTP response of a uvicorn server in one write instead of three. | uvicorn |
 | [`tcp_link`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/tcp_link.py) | server | Reads each client's TCP state from the server's kernel: RTT, retransmitted segments, congestion window. | Linux |
 | [`compressed`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/compressed.py) | server | Decompresses what the client compressed, byte for byte. | numpy; zstandard for zstd |
-| [`ping`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/ping.py) | server | A server-side ping, so that the robot's connection is never idle: the options to pass to your server. | a WebSocket server |
+| [`ping`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/ping.py) | server | A server-side ping, so that the robot's connection is not left idle while the server can answer it: the options to pass to your server. | a WebSocket server |
 | [`msgpack_io`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/msgpack_io.py) | both | Encodes observations and responses as msgpack, with numpy arrays as raw bytes. Also reads openpi's layout. | nothing |
 | [`latency_stats`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/latency_stats.py) | both | Counters, gauges and latencies with their p50, p95 and p99, read as one snapshot. | nothing |
 
@@ -238,75 +237,42 @@ type, and inference time is the main lever.
 
 Inference layer:
 
-| Component | Measured on | Without | With |
-|---|---|---|---|
-| `cuda_graphs` | The diffusion transformer of GR00T N1.7 on one L4; outputs compared on inputs it was not captured on | 224 ms per run | 146 ms per run (1.54×), exactly the same outputs |
-| `cuda_graphs` and `torch.compile` | The same model and GPU | `torch.compile(backend="cudagraphs")`: 225 ms (1.00×). inductor: 1.45×, outputs 0.0051 apart on average | 1.54×, exactly the same outputs |
-| `cuda_graphs` | A small flow-style model of many small kernels on one T4 ([`examples/check_on_a_gpu.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/check_on_a_gpu.py)) | 16.1 ms per run | 2.4 ms per run, byte for byte |
-| Batching | π0.5 on one L4, the model's own batched call | 5.99 requests per second at batch 1 | 8.21, 9.38, 10.52 and 10.66 at batches of 2, 4, 8 and 16 (1.78×) |
-| `slack`: the load a replica takes | Four robots, 300 s and about 2,100 requests per run, a stand-in model paced like a 15 Hz policy, in the serving stack the component was taken from | All four on one replica, a load of 0.95: 85.7% of responses within the 467 ms buffer | Two per replica on two replicas, a load of 0.88: 94.1% |
+| Component | Result | Measured on |
+|---|---|---|
+| `cuda_graphs` | 1.54× faster (224 → 146 ms), exactly the same outputs | GR00T N1.7's diffusion transformer, one L4 |
+| `cuda_graphs` against `torch.compile` | 1.54×, against 1.45× with different outputs (inductor) and 1.00× (cudagraphs) | the same model and GPU |
+| `cuda_graphs` | 6.7× faster (16.1 → 2.4 ms), byte for byte | a small model of many small kernels, one T4 |
+| Batching | up to 1.78× the requests per second (5.99 → 10.66) | π0.5, one L4, batch 16 |
+| `slack` | 94.1% of responses in time, against 85.7% with all robots on one replica | four robots, a model paced like a 15 Hz policy |
 
 Network layer:
 
-| Component | Measured on | Without | With |
-|---|---|---|---|
-| `window`, `ping`: each of four ways | A 24 KB upload 0.53 s after each response; two cloud machines, RTTs of 12, 21, 41, 65, 81 and 101 ms; 40 uploads per cell | 2.0 round trips, 40 of 40 uploads | 1.0 round trips, 0 of 40: the server's ping, the robot's ping, BBR on the robot's socket, or `tcp_slow_start_after_idle=0` |
-| `window`: BBR | A robot sending a request every 0.53 s with 24 KB of frames; RTT about 21 ms; 40 requests per setting | 40 of 40 requests took one extra round trip (21.5 ms) | 0 of 40 (0.5 to 3.0 ms) |
-| `window`: BBR, with 1% loss | The 24 KB upload at 22 ms with 1% loss on the link | 40 of 40 uploads took one extra round trip | 0 of 40 |
-| `openpi`, and `ping` over a WebSocket | A 100 KB upload 0.53 s after each response; an openpi-style WebSocket client; RTTs of 11, 21, 41 and 81 ms; 40 uploads per cell | 37.6, 44.4, 82.4 and 163.8 ms (3.3, 2.1, 2.0 and 2.0 round trips) | 12.7, 22.7, 41.8 and 82.6 ms with `openpi.keep()` (1.1, 1.1, 1.0 and 1.0 round trips); 1.2, 1.1, 1.0 and 1.0 round trips with the server pinging |
-| `lerobot` | A 100 KB request 0.53 s after each response between two Zenoh peers; the same machines and RTTs | 38.1, 44.8, 82.8 and 164.3 ms (3.4, 2.1, 2.0 and 2.0 round trips) | 13.9, 23.2, 42.3 and 82.2 ms with the keep-alive file on both ends (1.2, 1.1, 1.0 and 1.0 round trips) |
-| `ping`, the server's ping | 100 KB, 500 KB and 1 MB after 500 ms of silence; RTTs of 11.7 and 69.2 ms; 20 per cell | 3.0 round trips each | 1.1, 1.1 and 1.25 |
-| `window.Warm`, the robot's ping | 162 KB uploads 3 s apart; RTT 226 ms; 30 requests per setting | 303.6 ms for the upload to arrive | under 1 ms |
-| `one_write` | A GET behind one kind of tunnel; TCP connect p50 89.5 ms | 189.7 ms (headers, then body) | 106.7 ms (one write) |
-| `compress` | Camera frames of 172,800 bytes, decoded from a public dataset's video, on a laptop | 172,800 bytes | about 1.9 times smaller, for 0.37 ms to compress and 0.21 ms to decompress |
+| Component | Result | Measured on |
+|---|---|---|
+| `window`, `ping` | an upload after a pause in 1.0 round trips, not 2.0 | a 24 KB upload, RTTs of 12 to 101 ms |
+| `window`: BBR | no extra round trip after a pause, also with 1% loss | a 24 KB upload, RTT about 21 ms |
+| `ping`, the server's | 1.1 to 1.25 round trips, not 3.0 | 100 KB to 1 MB after 500 ms of silence |
+| `window.Warm`, the robot's ping | under 1 ms, not 303.6 ms, for an upload to arrive | 162 KB uploads 3 s apart, RTT 226 ms |
+| `one_write` | 106.7 ms, not 189.7, for a response | a GET through a tunnel |
+| `compress` | camera frames about 1.9 times smaller, 0.37 ms to compress | frames from a public dataset's video |
 
 [Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) lists every command, and [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench/) measures your own link.
 
 ## Limitations
 
-- **`cuda_graphs` is for PyTorch models bound by kernel launches.** π0.5 under JAX already fuses and graphs its
-  kernels and was 98% GPU-busy: there is no launch overhead to remove. A module called once per run, or with shapes
-  that change on every call, gains nothing. Only GR00T N1.7's diffusion transformer and a small test model have been
-  captured.
-- **Batching does not amortize a model's prefix.** On π0.5 the prefix (images and prompt) took 138 ms per request at
-  batch 1 and 119 ms at batch 16, so the gain levels off near 1.78×. Called as a server calls it, each observation
-  through the policy's input and output transforms, a batch of 8 gave 1.52× (5.1 to 7.8 requests per second). On
-  that model and an L4, batching added no capacity: one replica served 2 robots of a 15 Hz policy in time, and so
-  did openpi's own server, one request at a time.
-  [How many robots can one GPU serve?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-many-robots-can-one-gpu-serve.md#checked-on-a-real-model)
-- **Two replicas on one GPU give no throughput gain.** With π0.5 on an L4, two replicas whose calls overlapped each
-  took 2.1 times as long as one alone. With the CUDA Multi-Process Service (MPS) they were 6 to 9% faster than that.
-  Use one replica per GPU.
-- **`batcher` and `replicas` have unit tests and no measurement of their own.** The batching result measures the
-  model's own batched call. The `slack` results come from the serving stack the file was taken from, and from runs
-  of the file itself around the batched calls of π0.5, GR00T N1.6 and SmolVLA on an L4, in a test server with
-  simulated robots. No inference component has been run inside openpi's own policy server or LeRobot's.
-- **`slack` computes a capacity on a simulated clock, not on your model under load.** It runs the robots as its loop
-  would serve them, from up to 128 starts, and a number of robots is within capacity when 95% of their responses are
-  in time. From three models' batch times on an L4 it gives 2 robots of a 15 Hz policy for π0.5 and GR00T N1.6,
-  which 2 robots confirmed, and 1 for SmolVLA, where a formula for the load had given 8 and 4 robots had 95% of
-  their responses late. Rerun on SmolVLA, 3 robots had late responses and 2 had none: the 1 comes from the limit on
-  the load, which may be low for that model.
-  [Why the capacity is computed on a clock](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-many-robots-can-one-gpu-serve.md#why-the-capacity-is-computed-on-a-clock)
-  has the measurement, and [`examples/fleet_on_a_clock.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/fleet_on_a_clock.py) prints what the clock runs
-  for your batch times.
-- **A policy that leaves no slack is not batched by `slack`.** Where the robot sends a request only when a chunk is
-  fully executed, a replica serves one robot.
-- **The idle restart costs nothing on a long link.** At an RTT of 242 ms the 24 KB upload took 1.0 round trips with
-  no component, and at about 101 and 241 ms a robot on a fixed 0.53 s period took 0 or 1 extra round trips in 40.
-  Whether a robot is affected depends on its RTT, its pause and its upload size: [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench/) measures it.
-- **A ping does not restore a window that losses cut.** With 1% loss at RTTs of 22 and 101 ms, 31 and 35 of 40
-  uploads still took an extra round trip with the robot's ping. BBR removed it at 22 ms.
-- **On one home connection the ping helped only small uploads.** From a Linux client, a 100 KB upload after a pause went
-  from 5.5 round trips to 1.7 with the server's ping. 500 KB and 1 MB took 7.8 and 12.7 round trips with it and 10.3 and
-  13.4 without: the line's upload rate and packet loss were the cost, and BBR took 5.1 and 8.3.
-  [The table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#from-a-linux-client-on-a-home-connection) has every cell.
-- **`openpi.keep()` and the LeRobot setting were measured mostly with stand-ins.** The WebSocket and Zenoh measurements
-  used the `websockets` library and two Zenoh peers. `openpi.keep()` was also run once with openpi's own server and
-  client, on one link, two episodes per setting; the LeRobot setting was not run with LeRobot's own server and robot.
-- **`one_write` was measured behind one kind of tunnel**, not on a direct connection.
+- **`cuda_graphs` helps PyTorch models bound by kernel launches.** A JAX model such as π0.5 already graphs its kernels
+  and gains nothing.
+- **Batching levels off.** On π0.5 the images and prompt are processed for each request, so a batch of 16 gave 1.78×.
+- **Use one replica per GPU.** Two replicas on one GPU gave no more throughput than one.
+- **`slack` batches only policies that leave slack, and computes its capacity on a clock, not on your model under
+  load.** [`examples/fleet_on_a_clock.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/fleet_on_a_clock.py)
+  runs that clock on your own batch times.
+- **The network components fix pauses, not losses.** A ping does not restore a window that losses cut; BBR does. With
+  openpi's own server, which answers no ping during inference, only BBR keeps the window.
+  [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench/) measures your own link.
 
-[Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#limitations) has the rest.
+[Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) has every number and how
+it was taken.
 
 ## Repository layout
 
@@ -421,7 +387,7 @@ The three requests took under a second.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install "sequence-ai[server,arrays]"
+pip install sequence-ai
 ```
 
 The last line it prints (your versions may be newer):
@@ -430,8 +396,8 @@ The last line it prints (your versions may be newer):
 Successfully installed annotated-types-0.8.0 anyio-4.16.0 certifi-2026.10.23 click-8.5.1 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 idna-3.20 numpy-2.5.5 pillow-13.0.0 pydantic-2.14.3 pydantic-core-2.50.4 sequence-ai-0.62.0 sequence-base-0.8.12 typing-extensions-4.16.0 typing-inspection-0.4.5 uvicorn-0.54.0 zstandard-0.25.0
 ```
 
-`server` is uvicorn. `arrays` is numpy and zstandard. The package itself brings httpx, which `connect()` uses for its
-connection, Pillow, and what the `seq` command needs (pydantic and `sequence-base`).
+The package brings httpx, which `connect()` uses for its connection, Pillow, uvicorn, which runs the quick start's
+server, numpy and zstandard for arrays, and what the `seq` command needs (pydantic and `sequence-base`).
 
 ## 2. Start a policy server
 
@@ -1085,8 +1051,9 @@ ImportError: connect() uses httpx for its connection, and httpx is not installed
 
 ### `ModuleNotFoundError: No module named 'numpy'` or `'uvicorn'`
 
-The quickstart's two files import numpy, and its server runs under uvicorn:
-`pip install "sequence-ai[server,arrays]"` installs both.
+The quickstart's two files import numpy, and its server runs under uvicorn. Both are dependencies of `sequence-ai`, so
+`pip install sequence-ai` installs them. The error appears where the files were copied into a project that has neither:
+`pip install numpy uvicorn`.
 
 ```text
 ModuleNotFoundError: No module named 'numpy'
@@ -1113,13 +1080,11 @@ ImportError: encoding an array or PIL image needs Pillow, and it is missing or b
 
 The first line is what `frames.resize_image` raises, the second what `frames.encode` raises.
 
-### Which extra do I need?
+### What do I install?
 
 | You use | Install |
 |---|---|
-| `connect()` on the robot, `frames`, `window`, `ping`, `tcp_link`, `wifi_power`, `msgpack_io`, `latency_stats`, `lerobot`, and every inference component | `sequence-ai`, nothing more |
-| numpy arrays in observations or responses, `compress=True` | add `arrays`: `pip install "sequence-ai[arrays]"` |
-| `one_write` under uvicorn on the GPU | add `server`: `pip install "sequence-ai[server]"` |
+| `connect()` on the robot, the quick start's server, `frames`, `window`, `ping`, `tcp_link`, `one_write` under uvicorn, `wifi_power`, `msgpack_io`, `latency_stats`, `lerobot`, every inference component, numpy arrays in observations or responses, `compress=True` | `sequence-ai`, nothing more |
 | `bench/`, the measuring tool | a checkout of the repository; it is standard library only |
 
 Python 3.9 or later.
@@ -2313,7 +2278,7 @@ open source and runs on a GPU you already have: no account and no service of our
 On the GPU:
 
 ```bash
-pip install "sequence-ai[server,arrays]"
+pip install sequence-ai
 python quickstart_server.py 0.0.0.0 8000
 ```
 

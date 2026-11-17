@@ -3,7 +3,7 @@
 """
 Quickstart, server side: a policy server in one file. Put your model where `policy` is.
 
-    pip install "sequence-ai[server,arrays]"
+    pip install sequence-ai
     python quickstart_server.py                  # on this machine: 127.0.0.1:8000
     python quickstart_server.py 0.0.0.0 8000     # on your GPU, for a robot elsewhere
 

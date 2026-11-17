@@ -1,6 +1,6 @@
 # sequence-ai documentation
 
-`sequence-ai` is an open-source SDK for serving robot policies from remote GPUs over wide-area networks. It has an
+`sequence-ai` is an open-source framework for serving robot policies from remote GPUs over wide-area networks. It has an
 inference layer (`sequence_ai.engine`) and a network layer (`sequence_ai.network`), which work with any policy server,
 and the client and commands for GPUs rented from General Sequences. Each page here answers one question, starts with
 the answer and its code, and can be read independently.

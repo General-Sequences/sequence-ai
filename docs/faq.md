@@ -36,8 +36,9 @@ ImportError: connect() uses httpx for its connection, and httpx is not installed
 
 ### `ModuleNotFoundError: No module named 'numpy'` or `'uvicorn'`
 
-The quickstart's two files import numpy, and its server runs under uvicorn:
-`pip install "sequence-ai[server,arrays]"` installs both.
+The quickstart's two files import numpy, and its server runs under uvicorn. Both are dependencies of `sequence-ai`, so
+`pip install sequence-ai` installs them. The error appears where the files were copied into a project that has neither:
+`pip install numpy uvicorn`.
 
 ```text
 ModuleNotFoundError: No module named 'numpy'
@@ -64,13 +65,11 @@ ImportError: encoding an array or PIL image needs Pillow, and it is missing or b
 
 The first line is what `frames.resize_image` raises, the second what `frames.encode` raises.
 
-### Which extra do I need?
+### What do I install?
 
 | You use | Install |
 |---|---|
-| `connect()` on the robot, `frames`, `window`, `ping`, `tcp_link`, `wifi_power`, `msgpack_io`, `latency_stats`, `lerobot`, and every inference component | `sequence-ai`, nothing more |
-| numpy arrays in observations or responses, `compress=True` | add `arrays`: `pip install "sequence-ai[arrays]"` |
-| `one_write` under uvicorn on the GPU | add `server`: `pip install "sequence-ai[server]"` |
+| `connect()` on the robot, the quick start's server, `frames`, `window`, `ping`, `tcp_link`, `one_write` under uvicorn, `wifi_power`, `msgpack_io`, `latency_stats`, `lerobot`, every inference component, numpy arrays in observations or responses, `compress=True` | `sequence-ai`, nothing more |
 | `bench/`, the measuring tool | a checkout of the repository; it is standard library only |
 
 Python 3.9 or later.

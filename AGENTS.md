@@ -1,9 +1,9 @@
 # For coding assistants
 
-`sequence-ai` is an open-source SDK for serving robot policies from remote GPUs over wide-area networks. Two parts of it
-work with any policy server and are developed in this repository: the inference layer in `sequence_ai/engine/` and the
-network layer in `sequence_ai/network/`, independent components of one file each. A change here is almost always a
-change to one of those files. [`llms.txt`](llms.txt) maps the files; each module's docstring is its reference.
+`sequence-ai` is an open-source framework for serving robot policies from remote GPUs over wide-area networks. Two parts
+of it work with any policy server and are developed in this repository: the inference layer in `sequence_ai/engine/`
+and the network layer in `sequence_ai/network/`, independent components of one file each. A change here is almost
+always a change to one of those files. [`llms.txt`](llms.txt) maps the files; each module's docstring is its reference.
 
 The rest of the package, `seq/` and the modules of `sequence_ai/` outside those two directories, is the client for GPUs
 and deployments hosted by General Sequences. It is developed in General Sequences' own repository and published here, as
