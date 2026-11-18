@@ -81,8 +81,9 @@ Python 3.9 or later.
 Nothing is listening at that address and port. Check, in this order:
 
 1. The server is running, and its log shows the port you gave `connect()`.
-2. The server listens on an address the robot can reach. `127.0.0.1` is reachable from the same machine only: on a
-   GPU elsewhere, start it on `0.0.0.0` (`python quickstart_server.py 0.0.0.0 8000`).
+2. The server listens on an address the robot can reach. `127.0.0.1` is reachable from the same machine only.
+   `serve()` listens on every address unless it is given `host`; a server of your own, on a GPU elsewhere, starts on
+   `0.0.0.0`.
 3. The URL starts with `http://` and has the port: `connect("http://YOUR_GPU:8000")`.
 
 ```text
@@ -111,14 +112,18 @@ The host name in the URL does not resolve. Check the spelling, or use the GPU's 
 httpx.ConnectError: [Errno 8] nodename nor servname provided, or not known
 ```
 
-### `httpx.ReadTimeout: timed out`
+### `httpx.ReadTimeout: no response from ... The server may still be running this act`
 
-The server took longer than `timeout` to respond: `connect(url, timeout=60)` waits a minute. A model's first call is
-often its slowest, because it loads or compiles then. If every call is slow, the time is in the model and not in the
-link: the `server-timing` header in the [quickstart's server](quickstart.md) reports how long the model took.
+The server took longer than the robot waits: up to 120 s for the first act (`first_timeout`), 10 s for the others
+(`timeout`). A model's first inference is often its slowest, because it compiles then. Start the server with
+`serve(policy, example=observation)`, which runs the policy before it says it is ready, and call
+`link.wait_until_ready()` on the robot before it moves. If every call is slow, the time is in the model and not in the
+link: `python -m sequence_ai.check` says how long the server says its model took.
+
+With `timeout=1.0, first_timeout=1.0` against a model that took 3 s (sequence-ai 0.63.0):
 
 ```text
-httpx.ReadTimeout: timed out
+httpx.ReadTimeout: no response from http://127.0.0.1:8013 in 1 s. The server may still be running this act - a model's first inference compiles it, often for tens of seconds - and the next act waits for it first, as long as a first act waits. Wait for the server once, before the robot moves, with wait_until_ready(example=observation), or give connect() a longer first_timeout= (now 1 s) or timeout= (now 1 s)
 ```
 
 ## Sending and reading
@@ -132,13 +137,26 @@ The server has no POST at that path. `connect()` posts to `/act` unless told oth
 httpx.HTTPStatusError: Client error '404 Not Found' for url 'http://127.0.0.1:8012/infer'
 ```
 
+### `httpx.HTTPStatusError: Client error '401 Unauthorized'`
+
+The server was started with a token, and the robot sent none or another. Connect with the server's token:
+`sequence_ai.connect(url, token="...")`, the one given to `serve(policy, token=...)` or set as `SEQ_SERVE_TOKEN` on the
+GPU. `wait_until_ready()` says the same of `/ping`. Reproduced with sequence-ai 0.63.0:
+
+```text
+httpx.HTTPStatusError: Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/act'
+```
+
 ### `httpx.HTTPStatusError: Server error '500 Internal Server Error'` after adding `compress=True`
 
-The server does not decompress the arrays. Either add one line where it reads the body, or leave
-`compress=True` off:
+A server of your own does not decompress the arrays. (`serve()` does, and says so, and `connect()` compresses
+nothing for a server that does not say it decompresses; `compress=True` compresses whatever the server says.) Either
+decompress where the server reads the body, or leave `compress=True` off:
 
 ```python
-observation, _ = compressed.expand(msgpack_io.unpack(body), limit=64 << 20)
+from sequence_ai.network import compressed, msgpack_io
+
+observation_user, _ = compressed.expand(msgpack_io.unpack(body_user), limit=64 << 20)
 ```
 
 The robot sees this:
@@ -235,23 +253,46 @@ tested with LeRobot's own client and server. See
 
 ## On the server
 
-### `[Errno 48] error while attempting to bind on address ('127.0.0.1', 8000): address already in use`
+### `OSError: [Errno 48] port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine`
 
-Another program has the port. Give the server and the robot another one:
+Another program has the port, often an earlier `serve()` still running: `lsof -nP -iTCP:8000 -sTCP:LISTEN` names it.
+Stop it, or give the server and the robot another port:
 
 ```bash
 python quickstart_server.py 127.0.0.1 8001
 python quickstart_robot.py http://127.0.0.1:8001
 ```
 
+`serve()` (sequence-ai 0.63.0) prints:
+
+```text
+OSError: [Errno 48] port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine (an earlier serve() still running?); stop it, or pass another port
+```
+
+A uvicorn server of your own prints:
+
 ```text
 ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 8000): [errno 48] address already in use
+```
+
+### `ERROR: the policy failed on the example (KeyError: 'camera'): stopping`
+
+`serve()` ran the policy on `example` before saying it is ready, and the policy raised: the server stops, and the
+traceback it raises is the policy's own. Give `example` the keys and shapes your robot sends, or fix the policy. With a
+policy that reads a key the example does not have (sequence-ai 0.63.0):
+
+```text
+ERROR:    the policy failed on the example (KeyError: 'camera'): stopping
+INFO:     Shutting down
+...
+KeyError: 'camera'
 ```
 
 ### My server's log fills with `GET /ping`
 
 That is the robot keeping its connection warm: one small request for each 100 ms the connection is idle, for a
-minute after the last request. Three in 0.35 seconds looked like this:
+minute after the last request. `serve()` writes no line per request; a uvicorn server of your own wrote three in 0.35
+seconds:
 
 ```text
 INFO:     127.0.0.1:52970 - "GET /ping HTTP/1.1" 200 OK
@@ -310,12 +351,10 @@ What a network component saves depends on the link:
 
 - On round-trip times (RTTs) of about 101 and 241 ms, a robot sending a request every 0.53 s took no extra round trip
   after its pauses with the default settings, so there was nothing for BBR or a ping to save.
-- On a home connection with a cellular uplink, a server-side ping showed no benefit (a median of 264 ms
-  without it, 368 ms with it, six uploads each).
 - On loopback, or between two machines on one switch, a round trip costs almost nothing, so saving one saves almost
   nothing.
 
-The README has the [results](../README.md#results) and the [limitations](../README.md#limitations).
+The README has the [results](../README.md#results).
 [Measure your own link](how-do-i-measure-the-link-between-my-robot-and-my-gpu.md) before and after.
 
 ## `cuda_graphs`
@@ -334,12 +373,14 @@ The path names no attribute of your model. Paths are dotted attribute names from
 `cuda_graphs.modules_of(model)` lists them. Use the census to get the path instead of writing it by hand:
 
 ```python
-census = cuda_graphs.Census(cuda_graphs.modules_of(model))
+from sequence_ai.engine import cuda_graphs
+
+census_user = cuda_graphs.Census(cuda_graphs.modules_of(model_user))
 for _ in range(3):
-    model(observation)
-    census.end_act()
-census.close()
-print(census.candidates())        # [{'path': 'denoiser', 'calls': 10, 'ms': 1.05}]
+    model_user(observation_user)
+    census_user.end_act()
+census_user.close()
+print(census_user.candidates())        # [{'path': 'denoiser', 'calls': 10, 'ms': 1.05}]
 ```
 
 The line is printed on a machine with no GPU too, so a mistyped path shows up on a laptop.
@@ -397,17 +438,17 @@ arrives. Raise `wait_ms` slightly (the examples use 2 ms), or expect batches onl
 
 ### `TypeError: load must be a function a new process can import: defined at a module's top level, not a lambda and not a function inside another`
 
-Each replica starts in its own process and imports `load` by name. Move it to the top of a module:
+Each replica starts in its own process and imports `load_user` by name. Move it to the top of a module:
 
 ```python
-def load():                       # at the top of a module, not inside main() and not a lambda
-    model = build_model()
-    return model.infer            # what one call runs
+def load_user():                       # at the top of a module, not inside main() and not a lambda
+    model_user = build_model_user()
+    return model_user.infer            # what one call runs
 ```
 
 ### `ReplicaStartFailed: the model's load raised: ...`
 
-Your `load` raised in the replica's process; the text after the colon is its error, and the exception's `traceback`
+Your `load_user` raised in the replica's process; the text after the colon is its error, and the exception's `traceback`
 is the replica's. Run `load()` once in a plain script to see it directly.
 
 ### `ReplicaStartFailed: the model did not load within 900 s`
@@ -451,7 +492,7 @@ error. List only the sizes that run.
 ### A replica serves only one robot
 
 The policy leaves no slack: its robot requests the next chunk only when the current one is fully executed, so there
-is no time in which to wait for a batch. See "Limitations" in [`docs/slack.md`](slack.md).
+is no time in which to wait for a batch. See "Rules and requirements" in [`docs/slack.md`](slack.md#rules-and-requirements).
 
 ## General
 

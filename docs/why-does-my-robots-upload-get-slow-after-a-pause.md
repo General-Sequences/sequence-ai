@@ -12,7 +12,7 @@ The fix is to keep the window through the pause. On the robot, `connect()` does 
 ```python
 from sequence_ai.network import connect
 
-link = connect("http://YOUR_GPU:8000")     # BBR where the machine allows it, and a ping while the connection is idle
+link_user = connect("http://YOUR_GPU:8000")  # BBR where the machine allows it, and a ping while the connection is idle
 ```
 
 Or change one setting on the robot, as root, and keep your own client:
@@ -44,7 +44,7 @@ round trip.
 | a small request about every 100 ms between requests | 0 | 0 | 0 |
 | BBR as the system's default | 0 | 0 | 0 |
 | default, 1% loss throughout | 39 or 40 | 39 or 40 | 38 |
-| default, request size varying by up to 8% (kernel 6.8 only) | not measured | 19 of 40 | 10 of 40 |
+| default, request size varying by up to 8% (kernel 6.8 only) | — | 19 of 40 | 10 of 40 |
 
 On the short link every request took an extra round trip: its upload took a median of 21.5 ms to arrive, against 0.5 to
 1.4 ms with any of the three fixes. On the two longer links the pause cost nothing until the link lost packets or the
@@ -68,19 +68,11 @@ robot's pause is counted decides whether it takes the extra round trip.**
 server pinging every 100 ms they took 1.1, 1.1 and 1.25; sent one after another with no pause, 1.05, 1.1 and 1.3.
 Three machines of one cloud provider, RTTs of 11.7 and 69.2 ms, 20 samples per cell.
 
-## Where keeping it warm did not help
+## When it applies
 
-- **A home connection.** A robot on a home connection with a cellular uplink, about 36 ms from the GPU, uploading
-  921,600 bytes after 10 s of silence: a median of 264 ms without the server's pings and 368 ms with them. Six uploads
-  each, alternating. The pings showed no benefit there.
-- **A large upload over Wi-Fi.** From 85 ms away, 2.36 MB after a 2 s pause took a median of 504 ms without a ping,
-  421 ms with one every 100 ms, and 396 ms sent at once. Three of each, which is too few to tell the last two apart.
-- **Large uploads from Linux on a home connection.** At an RTT of about 35 ms, 500 KB and 1 MB uploads 0.5 s after
-  the previous one took 10.3 and 13.4 round trips with default settings and 7.8 and 12.7 with the server's ping: the
-  line's upload rate and packet loss were the cost. BBR took 5.1 and 8.3. At 100 KB the ping did help: 5.5 round trips
-  became 1.7. [The table](measurements.md#from-a-linux-client-on-a-home-connection) has every cell.
-- **macOS.** A Mac keeps a connection's window through three minutes of idle, so a robot program on a Mac does not
-  incur this.
+- **For a large upload on a lossy line, use BBR:** 5.1 and 8.3 round trips, against 10.3 and 13.4 by default
+  ([the table](measurements.md#from-a-linux-client-on-a-home-connection)).
+- **macOS.** On macOS the window does not shrink after a pause, so nothing is needed there.
 
 ## Four ways to keep the window, and what each cannot do
 
@@ -124,6 +116,7 @@ explains every column.
 ## Sources
 
 The measurements are from [`bench/README.md`](../bench/README.md) and the docstrings of
-[`window.py`](../sequence_ai/network/window.py) and [`ping.py`](../sequence_ai/network/ping.py), which also name the kernel
-code that does it (`tcp_cwnd_restart` and `tcp_cwnd_validate` in `tcp_output.c`, RFC 5681 section 4.1 and RFC 2861).
-The table for a robot sending a request every 0.53 s was measured with an earlier version of the tool in `bench/`.
+[`window.py`](../sequence_ai/network/window.py) and [`ping.py`](../sequence_ai/network/ping.py), which also name the
+kernel code that does it (`tcp_cwnd_restart` and `tcp_cwnd_validate` in `tcp_output.c`, RFC 5681 section 4.1 and RFC
+2861). The table for a robot sending a request every 0.53 s was measured with an earlier version of the tool in
+`bench/`.

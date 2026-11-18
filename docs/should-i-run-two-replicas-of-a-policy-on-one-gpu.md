@@ -8,9 +8,10 @@ own GPU, and on one GPU use one replica and batch its calls.
 ```python
 from sequence_ai.engine.replicas import ReplicaPool
 
-pool = ReplicaPool(load, replicas=2, devices=[0, 1])    # one replica per GPU; load() runs in the replica's process
-output = await pool.run(observation)                     # in a request's handler: off the event loop
-pool.close()
+# one replica per GPU; load_user() runs in the replica's process
+pool_user = ReplicaPool(load_user, replicas=2, devices=[0, 1])
+output_user = await pool_user.run(observation_user)  # in a request's handler: off the event loop
+pool_user.close()
 ```
 
 ## What was measured
@@ -28,8 +29,9 @@ not.
 
 - **Batch.** One replica serving several robots in one forward pass:
   [How many robots can one GPU serve?](how-many-robots-can-one-gpu-serve.md)
-- **Make the forward pass shorter**, where the model is PyTorch and calls a module many times per run:
-  [How do I make a PyTorch robot policy faster without changing its outputs?](how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
+- **Make the forward pass shorter**, where the model is PyTorch and calls a module many times per run: [How do I make a
+  PyTorch robot policy faster without changing its
+  outputs?](how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
 
 ## What `replicas` is for
 
@@ -45,5 +47,5 @@ not.
 
 ## One requirement
 
-`load` must be a function a new process can import: defined at the top of a module, not a lambda and not a function
-inside another. Each replica starts in its own process and imports it by name.
+The function given as `load` (`load_user` above) must be one a new process can import: defined at the top of a
+module, not a lambda and not a function inside another. Each replica starts in its own process and imports it by name.

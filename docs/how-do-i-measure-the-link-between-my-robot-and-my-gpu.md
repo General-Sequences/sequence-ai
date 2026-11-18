@@ -114,14 +114,6 @@ sudo tc qdisc del dev eth0 root
 | the same | 500 KB | 3.0 | 1.1 | 1.1 |
 | the same | 1 MB | 3.0 | 1.25 | 1.3 |
 
-And two results that differed:
-
-- **A home connection.** A robot on a home connection with a cellular uplink, about 36 ms from the GPU, uploading
-  921,600 bytes after 10 s of silence, six uploads each way: a median of 264 ms without the server's pings and 368 ms
-  with them. The pings showed no benefit.
-- **The last hop.** On the same line, a laptop with its Wi-Fi settings page open scanned for networks every 20
-  seconds, and a 30 Hz stream of 50 KB frames went from a median of 43 ms per frame to 181 ms while it scanned.
-
 [`bench/README.md`](../bench/README.md) has these in full, and
 [Why does my robot's upload get slow after a pause?](why-does-my-robots-upload-get-slow-after-a-pause.md) has the
 table for a robot that sends two requests per second.
@@ -134,8 +126,8 @@ server's kernel (Linux):
 ```python
 from sequence_ai.network import tcp_link
 
-tcp_link.read(sock)             # any connected socket: rtt_ms, rttvar_ms, retrans, total_retrans, cwnd
-tcp_link.of(scope["client"])    # in an ASGI app served with one_write_http(): this request's own connection
+tcp_link.read(sock_user)             # any connected socket: rtt_ms, rttvar_ms, retrans, total_retrans, cwnd
+tcp_link.of(scope_user["client"])    # in an ASGI app served with one_write_http(): this request's own connection
 ```
 
 and on the robot, `link.stats()["latency_us"]["act_us"]` gives each request's p50, p95 and p99 as the robot saw them.

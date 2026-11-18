@@ -544,7 +544,7 @@ def _cmd_robot(args: argparse.Namespace) -> int:
 
 
 def _cmd_gpu(args: argparse.Namespace) -> int:
-    """`seq gpu add | places | list | history | logs | allow | ssh | save | saved | remove`: GPU machines you run yourself
+    """`seq gpu add | places | list | history | logs | allow | follow-token | follow | ssh | save | saved | remove`: GPU machines you run yourself
     (seq/gpu_cli.py). `ssh` hands off to the system ssh and returns its exit code; the rest read or write gateway routes."""
     from seq import gpu_cli
 
@@ -561,6 +561,10 @@ def _cmd_gpu(args: argparse.Namespace) -> int:
         return _cmd_platform(args, gpu_cli.gpu_history, args.limit, args.cursor)
     if sub == "allow":
         return _cmd_platform(args, gpu_cli.gpu_allow, args.id, args.ranges)
+    if sub == "follow-token":
+        return _cmd_platform(args, gpu_cli.gpu_follow_token, args.id, args.robot, revoke=args.revoke)
+    if sub == "follow":
+        return _cmd_platform(args, gpu_cli.gpu_follow, token=args.token, address=args.address, line=args.line)
     if sub == "ssh":
         return gpu_cli.gpu_ssh(args.id, args.command, do_print=args.ssh_print, base_url=args.base_url)
     if sub == "save":

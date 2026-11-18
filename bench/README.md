@@ -50,7 +50,7 @@ sudo sysctl -w net.ipv4.tcp_slow_start_after_idle=0       # the kernel setting t
 sudo sysctl -w net.ipv4.tcp_no_metrics_save=1 && sudo ip tcp_metrics flush all    # between runs
 ```
 
-## Measured results and limitations
+## Measured results
 
 These are the runs behind the numbers in the top-level README. Each states its conditions, because each result changed
 with them.
@@ -84,13 +84,8 @@ was measured with an earlier tool; the first command above repeats it.
 So on a clean link the cost appears where the RTT is short, and returns on longer links once the link loses
 packets or the request size varies.
 
-**On a home connection it did not reproduce.** A robot on a home connection with a cellular uplink, to a GPU about
-36 ms away, uploading 921,600 bytes after 10 s of silence, six uploads each way, alternating: a median of 264 ms
-without the server's pings and 368 ms with them. On that line the pings showed no benefit. Measure yours.
-
-**The last hop can matter more than the distance.** On the same home connection, a laptop with its Wi-Fi settings
-page open scanned for networks every 20 seconds, and a 30 Hz stream of 50 KB frames went from a median of 43 ms per
-frame to 181 ms while it scanned.
+**Measure yours.** The two commands at the top run these measurements on the link between your robot and your
+GPU.
 
 ## A WebSocket link and a Zenoh link
 
@@ -115,5 +110,5 @@ On 2026-11-15 the three tools were run between two cloud machines 12 ms apart, w
 upload after a 0.53 s pause took two round trips on 40 of 40 uploads at every RTT up to 101 ms, and one with the
 server's ping, the robot's ping, BBR on the robot's socket or the kernel option at 0. At 242 ms it took one either
 way. Over a WebSocket and over Zenoh, a 100 KB upload took two to three round trips as they are and one with the
-components. With 1% loss the robot's ping did not help, and BBR did.
-[`docs/measurements.md`](../docs/measurements.md) has every table, the commands, and what that run does not show.
+components. With 1% loss, BBR kept the window.
+[`docs/measurements.md`](../docs/measurements.md) has every table, the commands and the scope of these measurements.

@@ -97,10 +97,10 @@ def over_limit_message(max_gpus: int, limit: int) -> str:
 
 def hold_cap_to_account(request: Any, base_url: str | None) -> None:
     """A GPU policy's own max GPUs past the account's limit, refused here - before code is uploaded or a build started - with
-    the platform's words. The CLI took any cap from 1 to 256 and a Starter account (limit 8) deployed with 100
-    ; the platform refuses it since, and this says so first
+    the platform's words. The CLI took any cap from 1 to 256 and a Starter account (limit 8) deployed with 100; the
+    platform refuses it since, and this says so first. A CPU policy's max GPUs counts no GPU, as the platform reads it.
     
-. A CPU policy's max GPUs counts no GPU, as the platform reads it."""
+"""
     gpus = [str(g) for g in (request.resources.gpu or [])]
     cap = request.autoscaler.max_gpus if request.autoscaler else None
     if cap is None or not any(g.lower() != "cpu" for g in gpus):
@@ -204,8 +204,8 @@ def _print_echo(request: Any, snap: Any = None, constructor: Any = None) -> None
     from sequence_base.constants.version import CONTRACT_VERSION
 
     print(f"{'policy':<12}{request.name}")
-    print(f"contract    valid for this SDK's deployment contract {CONTRACT_VERSION} (the platform checks it again "
-          "when you deploy)")
+    print(f"contract    valid for deployment contract {CONTRACT_VERSION}, the one this version of sequence-ai speaks "
+          "(the platform checks it again when you deploy)")
     _print_image(request.image)
     _print_deps(snap)
     w = request.weights
@@ -246,8 +246,8 @@ def _print_benchmark_echo(req: Any, snap: Any = None) -> None:
     from sequence_base.constants.version import CONTRACT_VERSION
 
     print(f"benchmark   {req.name}")
-    print(f"contract    valid for this SDK's contract {CONTRACT_VERSION} (the platform checks it again when you "
-          "deploy)")
+    print(f"contract    valid for contract {CONTRACT_VERSION}, the one this version of sequence-ai speaks (the platform "
+          "checks it again when you deploy)")
     _print_image(req.image)
     _print_deps(snap)
     if req.gpu == "cpu":
@@ -772,8 +772,7 @@ def _price_before(client: Any, request: Any, override: bool) -> list[str]:
 
 
 def registration_price_lines(verdict: dict | None) -> list[str]:
-    """What registering a benchmark costs before anything is paid, as the platform priced it (its dry run's `price`,
-    gateway deployments/first_start.registration): each machine a registration runs, by the hour, billed by the second
+    """What registering a benchmark costs before anything is paid, as the platform priced it (its dry run's `price`): each machine a registration runs, by the hour, billed by the second
     from when it starts - the one preparing its image where that is a machine of its own, and its check's, on its card.
     How long they run is the registration's own (first start says the last version's). Nothing from a platform that
     priced none.
@@ -1009,7 +1008,7 @@ _PLAYS_SAMPLE_AND_PLANS = ("playing its sample episode on it (@seq.sample), call
 
 def build_acts(policy: Any) -> bool:
     """Whether the build check acts on `policy` beside its sample episode: never - a policy's inputs are its own, and
-    the check plays the sample episode it marks (@seq.sample), which `sample` says. (harness/smoke_act.py)"""
+    the check plays the sample episode it marks (@seq.sample), which `sample` says."""
     return False
 
 

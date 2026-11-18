@@ -5,7 +5,9 @@ the robot's code changes in one line, the address it connects to, and the compon
 that GPU in the same way.
 
 ```python
-link = connect("http://ADDRESS:8000")       # the GPU's address
+import sequence_ai
+
+link_user = sequence_ai.connect("http://ADDRESS:8000")       # the GPU's address
 ```
 
 GPUs are in short supply, and few are near any given robot. [General Sequences](https://generalsequences.com) rents
@@ -20,8 +22,16 @@ seq gpu remove <id>                                             # ends it, and i
 ```
 
 The port is open to the address `seq gpu add` was run from; `seq gpu allow <id> <the robot's address>` opens it to the
-robot. This is a paid service, billed while the GPU runs. Everything else on this page, and every component, works the
-same on any other GPU. [Its documentation](https://generalsequences.com/docs/gpus/) has the rest.
+robot, an IPv6 range as well as an IPv4 one. A robot whose address changes, on a cellular or satellite line, gets a
+follow token, `seq gpu follow-token <id> --robot <name>`, and connects with `sequence_ai.connect(url, follow=token)`
+(or `$SEQUENCES_FOLLOW_TOKEN` set): its address of the moment is let in before it connects, and with two uplinks
+(`lines=["eth0", "wwan0"]`) each line's, by a follow that goes out by that line. Over IPv4, a cellular or satellite
+line's public address is usually shared by many of its provider's customers (carrier-grade NAT), and letting that
+address in lets them all in: where `seq gpu list` shows the GPU an IPv6 address, connect to that address or to the
+GPU's name, so that the robot follows over IPv6, and start the server with a token either way.
+
+This is a paid service, billed while the GPU runs. Everything else on this page, and every component, works the same on
+any other GPU. [Its documentation](https://generalsequences.com/docs/gpus/) has the rest.
 
 ## Why near
 
@@ -48,11 +58,12 @@ python examples/check_on_a_gpu.py        # the capture, checked against eager mo
 
 ## Before the robot connects
 
-- **The server listens on every address.** `127.0.0.1` is reachable from the GPU itself only:
-  `python quickstart_server.py 0.0.0.0 8000`.
+- **The server listens on every address.** `127.0.0.1` is reachable from the GPU itself only. `serve()` listens on
+  every address unless it is given `host`: `python quickstart_server.py` does.
 - **The port is open to the robot.** A rented GPU's firewall usually admits no one until you open a port. Open the
-  server's port to the address or range the robot connects from. If you open it to everyone, check credentials in your
-  server.
+  server's port to the address or range the robot connects from, or follow the robot's address with `follow=`. If you
+  open it to everyone, start the server with a token: `serve(policy, token="...")`, and `connect(url, token="...")` on
+  the robot.
 
 ## Then measure
 

@@ -41,16 +41,15 @@ This is the one area where the network layer adds to both, so it is described in
 Why the interval matters: on Linux, a connection that has sent nothing for longer than its retransmission timeout (at
 least its round-trip time (RTT) plus 200 ms) has its congestion window restarted. A ping every 20 seconds, or a frame
 every 1.5 seconds, is longer than that, so neither keeps a window through a robot's sub-second pauses. That is a
-statement about the mechanism. Whether it costs anything depends on the link, and on some links it cost nothing:
-[Why does my robot's upload get slow after a pause?](why-does-my-robots-upload-get-slow-after-a-pause.md)
+statement about the mechanism. Measure your own link with [`bench/`](../bench/).
 
 ## Test coverage
 
-| | Tested | Not tested |
-|---|---|---|
-| openpi | `openpi.keep()` on openpi-client 0.1.2's real `WebsocketClientPolicy`, against a stand-in server speaking openpi's protocol on one machine ([`examples/quickstart_openpi.py`](../examples/quickstart_openpi.py), `tests/network/test_openpi.py`). On a real link: `openpi.keep()`, and a server that pings, on a WebSocket connection of the kind openpi holds, with a stand-in for its client ([Measurements](measurements.md)). For the technical report: openpi's policy server (commit `215abfb`, `pi05_droid`, on an L4) and its own client in a closed loop over a home connection, with no network component of this package on the connection; and the same server and client with `openpi.keep()`, from a Linux virtual machine on a home connection ([the table](measurements.md#openpikeep-with-openpis-own-server-and-client)); and the same server pinging and decoding the pictures as `openpi.patch()` makes it, with the client sending them as JPEG as `openpi.image_tools` does, from a Mac on a home connection ([the table](measurements.md#pictures-as-jpeg-with-openpis-own-server-and-client)). `openpi.patch()`, the command and `image_tools` against a server module built as openpi's (`tests/network/test_openpi_server.py`) | The server's pings and the JPEG apart; either, and `openpi.keep()`, with openpi's own server on more than one link |
-| LeRobot | The keep-alive file on Zenoh 1.10.2: two idle peers on one machine then sent a frame about every 100 ms each way (`tests/network/test_lerobot.py`). On a real link: two Zenoh peers, with and without the file ([Measurements](measurements.md)) | LeRobot's client or server, with or without the file |
-| The components alone | Every measurement in the [README's table](../README.md#results), with the tool in [`bench/`](../bench/) or the servers named there | Those measurements with openpi or LeRobot as the server |
+| | Tested with |
+|---|---|
+| openpi | `openpi.keep()` on openpi-client 0.1.2's real `WebsocketClientPolicy`, against a stand-in server speaking openpi's protocol on one machine ([`examples/quickstart_openpi.py`](../examples/quickstart_openpi.py), `tests/network/test_openpi.py`). On a real link: `openpi.keep()`, and a server that pings, on a WebSocket connection of the kind openpi holds, with a stand-in for its client ([Measurements](measurements.md)). For the technical report: openpi's policy server (commit `215abfb`, `pi05_droid`, on an L4) and its own client in a closed loop over a home connection, with no network component of this package on the connection; and the same server and client with `openpi.keep()`, from a Linux virtual machine on a home connection ([the table](measurements.md#openpikeep-with-openpis-own-server-and-client)); and the same server pinging and decoding the pictures as `openpi.patch()` makes it, with the client sending them as JPEG as `openpi.image_tools` does, from a Mac on a home connection ([the table](measurements.md#pictures-as-jpeg-with-openpis-own-server-and-client)). `openpi.patch()`, the command and `image_tools` against a server module built as openpi's (`tests/network/test_openpi_server.py`) |
+| LeRobot | The keep-alive file on Zenoh 1.10.2: two idle peers on one machine then sent a frame about every 100 ms each way (`tests/network/test_lerobot.py`). On a real link: two Zenoh peers, with and without the file ([Measurements](measurements.md)) |
+| The components alone | Every measurement in the [README's table](../README.md#results), with the tool in [`bench/`](../bench/) or the servers named there |
 
 ## Which should I use?
 

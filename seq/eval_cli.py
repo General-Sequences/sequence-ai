@@ -241,7 +241,7 @@ _ESTIMATED = {"forward": "the policy's time for a batch", "network": "an act's n
 
 
 def fastest_line(fastest: dict | None, *, arms: int = 1) -> None:
-    """The fastest layout within the account's GPUs, as the platform worked it out (gateway eval/basis.py fastest) and
+    """The fastest layout within the account's GPUs, as the platform worked it out, and
     said as it is: the benchmark machines (and the worlds each runs, the platform's own), the policy machines, the GPUs
     of the limit, the time and the cost, and the flags that run it - beside what no measurement gave. Nothing where the
     platform sends none: a CPU benchmark, or an unmeasured one.
@@ -261,7 +261,7 @@ def fastest_line(fastest: dict | None, *, arms: int = 1) -> None:
 
 def parts_lines(parts: dict | None) -> None:
     """The estimate's cost by machine and by what it is billed for - GPU, CPU, memory - each the whole eval's, as the
-    platform worked it out (gateway eval/estimate.py burn_parts): a line for the policy machines and one for the
+    platform worked it out: a line for the policy machines and one for the
     benchmark machines - a part with nothing in it left out (a CPU machine has no GPU)."""
     for role, label in (("policy", "policy machines"), ("benchmark", "benchmark machines")):
         kinds = (parts or {}).get(role)
@@ -637,7 +637,7 @@ def print_status(snap: dict, *, echo: Callable[[str], Any] = print) -> None:
 
 def starting_said(snap: dict | None) -> str | None:
     """The platform's word on what an eval waits on before its first episode - a card, its machine's start, its benchmark's -
-    and about how long is left (gateway eval/machine_start.view), printed as it comes; None once an episode has begun.
+    and about how long is left, printed as it comes; None once an episode has begun.
     """
     starting = (snap or {}).get("starting")
     said = starting.get("sentence") if isinstance(starting, dict) else None
@@ -666,7 +666,7 @@ def start_said(timing: Any) -> str | None:
 
 def time_note(limit: dict | None, echo: Callable[[str], Any] = print) -> None:
     """The platform's word on an eval's time limit, when it has one: that its pace moved the limit on within its spend
-    cap, or that it will not finish by it (gateway runtime.time_view).
+    cap, or that it will not finish by it.
  
 """
     note = (limit or {}).get("note")
@@ -894,7 +894,7 @@ def print_report(report: Any, details: dict | None = None, *, earlier_cost: floa
     overall and per task — the platform names none of them — each with its n;
     and the time limit each arm ran with, beside the benchmark's own. A rerun's
     (`earlier_cost`: what the eval it completes cost) says both runs' cost: it covers both runs' episodes, and
-    "$2.0269" alone read as what all 500 had cost, where the eval it reran had cost $6.7830 more.
+    the rerun's cost alone read as what all its episodes had cost, where the eval it reran had cost more.
     """
     details = details or {}
     m = details.get("manifest") or {}

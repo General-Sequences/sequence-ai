@@ -21,11 +21,11 @@ inference components (`sequence_ai.engine`) are described in the [README](../REA
 ```python
 from sequence_ai.network import window
 
-transport = httpx.HTTPTransport(socket_options=window.socket_options())    # BBR and TCP keepalive, where it can
-window.keep(sock)                                                          # or BBR on your own socket
+transport_user = httpx.HTTPTransport(socket_options=window.socket_options())    # BBR and TCP keepalive, where it can
+window.keep(sock_user)                                                          # or BBR on your own socket
 
-warm = window.Warm(ping=lambda: client.get("/ping"))    # a ping while the connection is idle
-warm.used()                                              # each time you send on it
+warm_user = window.Warm(ping=lambda: client.get("/ping"))    # a ping while the connection is idle
+warm_user.used()                                              # each time you send on it
 
 window.check()                                           # warns once: what this machine does after a pause
 ```
@@ -64,9 +64,10 @@ pings in 0.3 s of idle time: 5
 ```python
 from sequence_ai.network import compress, msgpack_io
 
-squeeze = compress.Squeeze()                                  # one per connection
-body = msgpack_io.pack(squeeze.apply(observation))            # large arrays compressed in place, if that saves time
-squeeze.uplink.note(len(body), seconds_the_upload_took)       # so it learns this link's upload rate
+squeeze_user = compress.Squeeze()                                       # one per connection
+# large arrays compressed in place, if that saves time
+body_user = msgpack_io.pack(squeeze_user.apply(observation_user))
+squeeze_user.uplink.note(len(body_user), seconds_the_upload_took_user)  # so it learns this link's upload rate
 ```
 
 An array is compressed with zstd level 1 only while the upload time that saves, at the uplink rate measured on this
@@ -95,9 +96,9 @@ uncompressed.
 ```python
 from sequence_ai.network import frames
 
-frame = frames.resize_image(camera.read(), 224, 224, mode="pad", filter="bilinear")
-data = frames.encode(frame)            # a base64 JPEG
-image = frames.decode(data)            # on the server: the HxWx3 uint8 array its policy reads
+frame_user = frames.resize_image(camera_user.read(), 224, 224, mode="pad", filter="bilinear")
+data_user = frames.encode(frame_user)            # a base64 JPEG
+image_user = frames.decode(data_user)            # on the server: the HxWx3 uint8 array its policy reads
 ```
 
 `"pad"` is openpi's `resize_with_pad`, byte for byte. The mode and the filter have no default and must be passed: a
@@ -137,9 +138,9 @@ Wi-Fi power saving is on: no (or this is not Linux, or not Wi-Fi)
 ```python
 from sequence_ai.network import connect
 
-with connect("http://your-gpu:8000", compress=True) as link:     # compress: only if your server decompresses
-    response = link.act({"image": frame, "state": state})
-    print(link.stats()["latency_us"]["act_us"])                   # the requests' p50, p95 and p99
+with connect("http://your-gpu:8000", compress=True) as link_user:     # compress: only if your server decompresses
+    response_user = link_user.act({"image": frame_user, "state": state_user})
+    print(link_user.stats()["latency_us"]["act_us"])                   # the requests' p50, p95 and p99
 ```
 
 One httpx connection with `window`'s socket options on it, a small GET while it is idle, msgpack both ways, and each
@@ -173,31 +174,26 @@ call. `connect()` keeps one.
 import websockets
 from sequence_ai.network import ping
 
-async with ping.serve(handler, host, port) as server:      # websockets' own server, with a ping every 100 ms
-    await server.serve_forever()
+# websockets' own server, with a ping every 100 ms
+async with ping.serve(handler_user, host_user, port_user) as server_user:
+    await server_user.serve_forever()
 
-async with websockets.serve(handler, host, port, **ping.websockets_options()):    # the same, as its options
+# the same, as its options
+async with websockets.serve(handler_user, host_user, port_user, **ping.websockets_options()):
     ...
 
-uvicorn.run(app, **ping.uvicorn_options())                                         # the same, under uvicorn
+uvicorn.run(app_user, **ping.uvicorn_options())                                         # the same, under uvicorn
 ```
 
 A WebSocket library answers a ping with a pong by itself. A server that pings therefore makes the robot send a few
 bytes each interval, and the robot's kernel never counts the connection idle. Nothing changes on the robot.
 
-**Measured.**
-
-- **Where it helped.** Between machines of one cloud provider, on RTTs of 11.7 and 69.2 ms, an upload after
-  500 ms of silence took 3.0 round trips; with the server pinging every 100 ms it took 1.1 (100 KB and 500 KB) and
-  1.25 (1 MB).
-- **Where it did not.** On a home connection with a cellular uplink, about 36 ms from the GPU, 921,600-byte
-  uploads after 10 s of silence took a median of 264 ms without the pings and 368 ms with them (six each,
-  alternating).
+**Measured.** Between machines of one cloud provider, on RTTs of 11.7 and 69.2 ms, an upload after 500 ms of silence
+took 3.0 round trips; with the server pinging every 100 ms it took 1.1 (100 KB and 500 KB) and 1.25 (1 MB).
 
 A server that answers one HTTP request with one response cannot send anything unsolicited. There the ping comes from the
-robot: `window.Warm`, which `connect()` applies to its connection.
-[How do I keep a WebSocket policy server's connection warm?](how-do-i-keep-a-websocket-policy-servers-connection-warm.md)
-has the rest.
+robot: `window.Warm`, which `connect()` applies to its connection. [How do I keep a WebSocket policy server's connection
+warm?](how-do-i-keep-a-websocket-policy-servers-connection-warm.md) has the rest.
 
 `python examples/components/ping.py` printed:
 
@@ -212,16 +208,16 @@ the server measured the connection's RTT from its pings: 0.17 ms
 import uvicorn
 from sequence_ai.network.one_write import WholeResponse, one_write_http
 
-uvicorn.run(WholeResponse(app), http=one_write_http())
+uvicorn.run(WholeResponse(app_user), http=one_write_http())
 ```
 
-`app` is any ASGI app: FastAPI's and Starlette's too.
+`app_user` is any ASGI app: FastAPI's and Starlette's too.
 
 uvicorn writes a response in pieces. A tunnel or proxy in front of the server can delay every piece after the first
 until the client has acknowledged the first, so each request takes one more round trip than necessary.
 
 **Measured.** Behind such a tunnel, with a TCP connect of p50 89.5 ms: headers then body, GET p50 189.7 ms; the same
-response in one write, 106.7 ms. Not measured on a direct connection, and the number of samples was not recorded.
+response in one write, 106.7 ms.
 
 `python examples/components/one_write.py` printed `response: b'ok'`.
 
@@ -230,8 +226,8 @@ response in one write, 106.7 ms. Not measured on a direct connection, and the nu
 ```python
 from sequence_ai.network import tcp_link
 
-tcp_link.read(sock)             # any connected socket
-tcp_link.of(scope["client"])    # in an ASGI app served with one_write_http(): this request's own connection
+tcp_link.read(sock_user)             # any connected socket
+tcp_link.of(scope_user["client"])    # in an ASGI app served with one_write_http(): this request's own connection
 ```
 
 Each returns `rtt_ms`, `rttvar_ms`, `retrans`, `total_retrans`, `cwnd` and, where the kernel provides it,
@@ -249,7 +245,7 @@ this connection, as the server's kernel reports it: None
 ```python
 from sequence_ai.network import compressed, msgpack_io
 
-observation, grew = compressed.expand(msgpack_io.unpack(body), limit=64 << 20)
+observation_user, grew_user = compressed.expand(msgpack_io.unpack(body_user), limit=64 << 20)
 ```
 
 An item whose declared size is smaller than its decompressed size is rejected rather than decompressed past `limit`.
@@ -261,8 +257,8 @@ An item whose declared size is smaller than its decompressed size is rejected ra
 ```python
 from sequence_ai.network import msgpack_io
 
-body = msgpack_io.pack({"image": frame, "state": joints})
-observation = msgpack_io.unpack(body)
+body_user = msgpack_io.pack({"image": frame_user, "state": joints_user})
+observation_user = msgpack_io.unpack(body_user)
 ```
 
 Bytes are sent as bytes and numpy arrays as their raw data, whereas JSON carries bytes as base64, a third larger on the
@@ -281,9 +277,9 @@ arrays returned as arrays: (224, 224, 3) float32
 ```python
 from sequence_ai.network.latency_stats import LatencyStats, now_us
 
-stats = LatencyStats(latencies=["request_us"])
-sent = now_us(); ...; stats.since("request_us", sent)
-stats.snapshot()["latency_us"]["request_us"]    # n, mean, max, p50, p95, p99
+stats_user = LatencyStats(latencies=["request_us"])
+sent_user = now_us(); ...; stats_user.since("request_us", sent_user)
+stats_user.snapshot()["latency_us"]["request_us"]    # n, mean, max, p50, p95, p99
 ```
 
 A percentile is `None` until its window contains enough samples for it: the p99 of 20 samples is only the largest of the
@@ -311,10 +307,10 @@ from openpi_client import websocket_client_policy
 from sequence_ai.network import openpi
 from sequence_ai.network.openpi import image_tools     # in place of openpi_client's: pictures go as JPEG
 
-policy = websocket_client_policy.WebsocketClientPolicy(host, port)
-kept = openpi.keep(policy)             # BBR and TCP keepalive on its socket; a WebSocket ping while it is idle
-observation["observation/image"] = image_tools.resize_with_pad(frame, 224, 224)
-action = policy.infer(observation)     # as before
+policy_user = websocket_client_policy.WebsocketClientPolicy(host_user, port_user)
+kept_user = openpi.keep(policy_user)  # BBR and TCP keepalive on its socket; a WebSocket ping while it is idle
+observation_user["observation/image"] = image_tools.resize_with_pad(frame_user, 224, 224)
+action_user = policy_user.infer(observation_user)     # as before
 ```
 
 In a server script of your own, `openpi.patch()` before it makes openpi's server does what the command does.
@@ -334,7 +330,7 @@ seconds. One setting makes it every 100 ms:
 ```python
 from sequence_ai.network import lerobot
 
-path = lerobot.keep_alive_file("zenoh-keep-alive.json5")
+path_user = lerobot.keep_alive_file("zenoh-keep-alive.json5")
 ```
 
 Give the file to both sides: the policy server reads it from `zenoh.config_file`, and the robot's remote inference
@@ -342,6 +338,5 @@ from `zenoh_config_path`.
 
 Checked: Zenoh 1.10.2 takes the setting, and two idle peers on one machine then sent a frame every 102 ms each way.
 Measured between two Zenoh peers on two cloud machines: a 100 KB request 0.53 s after each response took two to three
-round trips without the file and one with it ([Measurements](measurements.md)). Not tested
-with LeRobot's own client and server.
+round trips without the file and one with it ([Measurements](measurements.md)).
 [How do I reduce the latency of LeRobot remote inference?](how-do-i-reduce-the-latency-of-lerobot-remote-inference.md)

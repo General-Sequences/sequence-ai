@@ -19,10 +19,12 @@ from openpi_client import websocket_client_policy
 from sequence_ai.network import openpi
 from sequence_ai.network.openpi import image_tools      # was: from openpi_client import image_tools
 
-policy = websocket_client_policy.WebsocketClientPolicy(host="YOUR_GPU", port=8000)
-kept = openpi.keep(policy)                               # keeps the connection warm
-observation["observation/exterior_image_1_left"] = image_tools.resize_with_pad(frame, 224, 224)    # now a JPEG
-action_chunk = policy.infer(observation)["actions"]     # openpi's own call, unchanged
+policy_user = websocket_client_policy.WebsocketClientPolicy(host="YOUR_GPU", port=8000)
+# keeps the connection warm
+kept_user = openpi.keep(policy_user)
+observation_user["observation/exterior_image_1_left"] = image_tools.resize_with_pad(frame_user, 224, 224)  # now a JPEG
+# openpi's own call, unchanged
+action_chunk_user = policy_user.infer(observation_user)["actions"]
 ```
 
 ```bash
@@ -57,7 +59,8 @@ JPEG makes the upload itself smaller: two 224 x 224 pictures are 301,056 bytes a
 `kept.warm.pings` how many pings were answered. `kept.close()` stops the pings; the connection stays openpi's.
 
 In a server script of your own, call `openpi.patch()` before it makes openpi's `WebsocketPolicyServer`: that is what the
-command does before it runs `scripts/serve_policy.py`.
+command does before it runs `scripts/serve_policy.py`. `patch()` needs openpi's own `websocket_policy_server.py`; any
+other server is refused with `TypeError`.
 
 ## Try it without a GPU or a checkpoint
 
@@ -83,10 +86,45 @@ Twelve pings is four in each of the three half-second pauses. BBR is `False` bec
 
 Against a real openpi server, [`examples/openpi_robot.py`](../examples/openpi_robot.py) takes its host and port.
 
+## Or serve the policy with `serve()`
+
+To serve several robots in batches, or to give the robot `connect()` in place of openpi's client, serve the policy with
+`sequence_ai.serve()` in openpi's environment on the GPU:
+
+```python
+from openpi.policies import policy_config
+from openpi.training import config as openpi_config
+
+import sequence_ai
+from sequence_ai.engine import openpi
+
+policy_user = policy_config.create_trained_policy(openpi_config.get_config("pi05_droid"), checkpoint_dir_user)
+sequence_ai.serve(openpi.batched(policy_user), batch=[1, 2, 4, 8], example=observation_user)  # or serve(policy.infer)
+```
+
+On the robot, the observation keeps openpi's keys, and `act()` returns what openpi's `infer()` returns:
+
+```python
+import sequence_ai
+
+link_user = sequence_ai.connect("http://YOUR_GPU:8000")
+# observation["observation/exterior_image_1_left"]: the frame
+action_chunk_user = link_user.act(observation_user)["actions"]
+```
+
+`openpi.batched(policy)` passes each observation through the policy's transforms, as `infer()` does, and samples all of
+them in one call, each with its own noise. The policy's JAX model compiles each listed batch size once, in the warm-up
+on `example`. A PyTorch checkpoint runs its observations one by one. Every default of [What is on by
+default](what-is-on-by-default.md) applies: the robot sends each 224×224 picture as JPEG, the server turns it back into
+the array the policy reads. At quality 95, JPEG moved π0.5's actions by 5.9% on average, a tenth of the policy's own
+run-to-run noise; `jpeg=False` sends exact pixels.
+
 ## Tested
 
 - **Verified:** `openpi.keep()` against openpi-client 0.1.2 on a local connection, as above and in
   `tests/network/test_openpi.py`.
+- **Verified:** `openpi.batched()` against stand-ins of openpi's model and transforms: one call to the model per
+  batch, each observation's own transforms and output (`tests/engine/test_openpi.py`).
 - **Verified:** the server's pings and its decoding, and `image_tools`, against a server module built as openpi's
   `websocket_policy_server.py` is, on a local connection; and the command, against a script run as
   `scripts/serve_policy.py` is (`tests/network/test_openpi_server.py`).
@@ -105,23 +143,6 @@ Against a real openpi server, [`examples/openpi_robot.py`](../examples/openpi_ro
   robot a simulated arm on a Mac on a home connection, the server pinging. Each request's upload went from 301.5 KB to
   18.8 KB, and the time it spent outside the server, beyond one RTT, from about 97 to about 21 ms at the median.
   [The table](measurements.md#pictures-as-jpeg-with-openpis-own-server-and-client).
-
-## Limitations
-
-- With openpi's own policy server, `keep()` has been measured on one link only: two 45 s episodes per setting, from a
-  Linux virtual machine on a home connection. In the episode that lost packets it was no better than without it.
-- The pictures as JPEG have been measured in one episode, against one with arrays, and together with the server's
-  pings: the two were not measured apart.
-- In that run the server took about 20 ms longer for each inference than when openpi's own command started it, with or
-  without the pings and the decoding. It was started through another script, as `python -m` starts it, and why that
-  costs time is not known. `openpi.patch()` in a server script of your own starts nothing through another script; it
-  has not been measured.
-- A JPEG is not the frame it was made from: at quality 95 it moved a π0.5 policy's actions by 5.9% on average over 50
-  real observations, about a tenth of what the policy's own sampling noise does
-  ([`frames.py`](../sequence_ai/network/frames.py) has the measurement).
-- `patch()` changes openpi's server through its module's `_server` and its `WebsocketPolicyServer`, as openpi's
-  `websocket_policy_server.py` has them: a version built otherwise is refused with a `TypeError`, not changed.
-- The README's [limitations](../README.md#limitations) list the links where the idle restart costs nothing.
 
 ## What openpi already does
 

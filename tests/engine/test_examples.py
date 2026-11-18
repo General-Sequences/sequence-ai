@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 General Sequences Company
 # SPDX-License-Identifier: Apache-2.0
 """
-The inference layer's examples run: the quickstart, graphing a module, and three components together. Each component's
-own example is run by tests/network/test_examples.py. An example that stops running is a line in the README that
-stopped being true.
+The inference layer's examples run: the quickstart, graphing a module, three components together, a fleet on a clock,
+and a PyTorch model served in one call. Each component's own example is run by tests/network/test_examples.py. An
+example that stops running is a line in the README that stopped being true.
 """
 import importlib.util
 import os
@@ -14,8 +14,9 @@ import sys
 import pytest
 
 EXAMPLES = pathlib.Path(__file__).resolve().parents[2] / "examples"
-RUN = ["quickstart_batching.py", "graph_a_module.py", "serve_with_replicas.py", "fleet_on_a_clock.py"]
-NEEDS_TORCH = {"graph_a_module.py", "serve_with_replicas.py"}
+RUN = ["quickstart_batching.py", "graph_a_module.py", "serve_with_replicas.py", "fleet_on_a_clock.py",
+       "serve_a_pytorch_model.py"]
+NEEDS_TORCH = {"graph_a_module.py", "serve_with_replicas.py", "serve_a_pytorch_model.py"}
 
 
 @pytest.mark.parametrize("name", RUN)

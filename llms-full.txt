@@ -1,10 +1,11 @@
 # sequence-ai
 
 > `sequence-ai` is an open-source framework for serving robot policies from remote GPUs over wide-area networks (Python,
-> Apache-2.0). Its inference layer (`sequence_ai.engine`) and its network layer (`sequence_ai.network`) work with any
-> policy server: each component is one file that is used independently in an existing server or robot program, most of
-> them standard library only (`cuda_graphs` needs torch 2.4 or later). The rest of the package is the client and the
-> `seq` command for GPUs and deployments hosted by General Sequences.
+> Apache-2.0): `sequence_ai.serve(policy)` on the GPU, `sequence_ai.connect(address)` on the robot, every default on.
+> Its inference layer (`sequence_ai.engine`) and its network layer (`sequence_ai.network`) also work in any policy
+> server: each component is one file that is used independently in an existing server or robot program, most of them
+> standard library only (`cuda_graphs` needs torch 2.4 or later). The rest of the package is the client and the `seq`
+> command for GPUs and deployments hosted by General Sequences.
 
 This file is https://github.com/General-Sequences/sequence-ai's README and documentation in one piece, written by tools/make_llms_full.py.
 The map of the repository, file by file, is https://github.com/General-Sequences/sequence-ai/blob/main/llms.txt.
@@ -14,8 +15,9 @@ The map of the repository, file by file, is https://github.com/General-Sequences
 Source: https://github.com/General-Sequences/sequence-ai/blob/main/README.md
 
 `sequence-ai` is an open-source framework for serving robot policies from remote GPUs over wide-area networks (WANs). It
-supports all open-source robot policies. It runs on your own GPU, or on one rented from
-[General Sequences](https://generalsequences.com) near your robot: on the robot, only what `connect()` is given changes.
+is used with openpi, LeRobot, GR00T and Octo policies, and with any policy given as a function. It runs on your own
+GPU, or on one rented from [General Sequences](https://generalsequences.com) near your robot: on the robot, only what
+`connect()` is given changes.
 
 Give it a policy server and a robot. On the GPU, it replays the module a model calls many times per inference from CUDA
 graphs, with exactly the same outputs, and batches several robots' requests within the slack their action chunks
@@ -26,26 +28,39 @@ Wide-Area Network). Each component is one file that can be added to existing cod
 ## Install
 
 ```bash
-pip install sequence-ai      # the robot's client, the seq command, every component and the quick start's server
+pip install sequence-ai      # both sides: serve() on the GPU, connect() on the robot, every component, the seq command
 ```
 
-Python 3.9 or later for the client and the components, on Linux and macOS; the `seq` command needs Python 3.10 or
+One package, two parts: the open-source framework (`serve()`, `connect()` to an address, `sequence_ai.engine`,
+`sequence_ai.network`) and the client of General Sequences' GPUs and hosted deployments (`seq`, `sequence_ai.gpu`,
+`connect()` to a deployment's name). Python 3.9 or later for the client and the components, on Linux and macOS; the `seq` command needs Python 3.10 or
 later. `cuda_graphs` uses the torch your model already has (2.4 or later). Each component is one file, and most import
 only the standard library, so copying a file into your project works as well.
 
 ## Quick start
 
-On the robot, one call applies the client-side network components to one connection:
+On the GPU, one call serves your model, given as a function:
 
 ```python
 import sequence_ai
 
+sequence_ai.serve(policy_user, port=8000, example=observation_user)  # policy_user(observation) -> what the robot needs
+```
+
+On the robot, one call connects to it:
+
+```python
 with sequence_ai.connect("http://your-gpu:8000") as policy_user:     # BBR, TCP keepalive, a ping while idle, msgpack
     policy_user.observe({"image": frame_user, "state": state_user})
     actions_user = policy_user.act()["actions"]
 ```
 
-On the GPU, the inference components wrap the model you already have:
+Both sides' defaults are on: pictures go as JPEG, large arrays are compressed where that saves time, the policy runs on
+a thread of its own and is warmed up before the server says it is ready.
+[What is on by default](https://github.com/General-Sequences/sequence-ai/blob/main/docs/what-is-on-by-default.md) lists each part and how to turn it off, and
+`python -m sequence_ai.check http://your-gpu:8000` says which are on.
+
+In a server of your own, the inference components wrap the model you already have:
 
 ```python
 from sequence_ai.engine import cuda_graphs
@@ -76,11 +91,14 @@ request 0: 8 actions of 7 numbers, the first [128. 128. 128.]
 
 ## Three ways to run it
 
-| | Whose GPU | What you run on it | On the robot |
-|---|---|---|---|
-| **Your own server** | Yours, or any GPU the robot can reach | Your policy server, with the components you add | `connect("http://your-gpu:8000")` |
-| **A GPU near your robot** | One rented from General Sequences, by city | The same server | `connect("http://<its address>:8000")` |
-| **A hosted deployment** | General Sequences' | Nothing: the platform builds your policy, serves it and scores it | `connect("my_policy_user")` |
+The code is the same on all three: `serve(policy)` on the GPU, `connect(...)` on the robot. Only where the GPU comes
+from changes.
+
+| Where the GPU comes from | On the GPU | On the robot |
+|---|---|---|
+| **Your own**, or any GPU the robot can reach | `sequence_ai.serve(policy_user)` | `connect("http://your-gpu:8000")` |
+| **Rented from General Sequences** near your robot, by city | `sequence_ai.serve(policy_user)` | `connect("http://<its address>:8000")` |
+| **A hosted deployment** of General Sequences | nothing: the platform builds your policy, serves it and scores it | `connect("my_policy_user")` |
 
 The first needs no account and costs nothing. The other two are paid services of General Sequences, billed while a GPU
 runs, and their commands are in this package:
@@ -103,9 +121,10 @@ teleoperation, and every `seq` command.
  │  your control loop      │                        │  your policy              │
  ├─────────────────────────┤      observation       ├───────────────────────────┤
  │  sequence_ai.network    │  ───────────────────▶  │  sequence_ai.engine       │
- │    connect · openpi     │                        │    cuda_graphs · batcher  │
- │    window · compress    │          WAN           │    replicas · slack       │
- │    frames · wifi_power  │                        ├───────────────────────────┤
+ │    connect · openpi     │                        │    serve · cuda_graphs    │
+ │    window · compress    │          WAN           │    batcher · replicas     │
+ │    frames · wifi_power  │                        │    slack                  │
+ │                         │                        ├───────────────────────────┤
  │                         │  ◀───────────────────  │  sequence_ai.network      │
  │                         │      action chunk      │    one_write · ping       │
  └─────────────────────────┘                        │    tcp_link · compressed  │
@@ -117,8 +136,8 @@ teleoperation, and every `seq` command.
 **`sequence_ai.network`** is the connection between a robot and the GPU its policy runs on. On the robot, `connect()`
 applies the client-side components to one connection, and `openpi.keep()` does the same on the connection that openpi's
 own client holds. On the server, `one_write` and `ping` wrap a uvicorn or a WebSocket server. **`sequence_ai.engine`**
-is the inference layer on the GPU: `cuda_graphs` shortens one inference, `batcher` and `slack` share a GPU among robots,
-and `replicas` runs one process per GPU. **`bench/`** measures a link before anything is added to it.
+is the inference layer on the GPU: `serve()` serves a policy with the server's side of both layers on, `cuda_graphs`
+shortens one inference, `batcher` and `slack` share a GPU among robots, and `replicas` runs one process per GPU. **`bench/`** measures a link before anything is added to it.
 
 ## The problem, by layer
 
@@ -150,6 +169,7 @@ Sequences, reached with this package's `seq gpu` commands. [Three ways to run it
 
 | Component | What it does | To add it | Requires |
 |---|---|---|---|
+| [`serve`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/serve.py) | Serves a policy, given as a function or a batch function, to robots elsewhere: on a thread of its own, pings answered at once, a warm-up, pictures and compressed arrays restored. `openpi.batched(policy)` makes an openpi policy a batch function. | one call | what sequence-ai installs |
 | [`cuda_graphs`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/cuda_graphs.py) | Replays a torch module that your model calls many times per run from CUDA graphs captured from its own eager kernels. A graph is kept only when its output is exactly the same. | one call | torch 2.4 or later, a CUDA GPU |
 | [`batcher`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/batcher.py) | Batches the calls waiting for a model into one call, in the batch sizes the model lists. | one object, one `await` | nothing |
 | [`replicas`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/replicas.py) | Runs replicas of a model, each in its own process on the GPU assigned to it, and replaces one that dies. | one object, one `await` | nothing |
@@ -171,10 +191,11 @@ seating_user = slack.Seating(table_user, play_user["buffer_s"] * 1000, sizes=[1,
 seats_user, over_user = seating_user.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
 ```
 
-- **`cuda_graphs`** counts the calls each module gets over a few runs (`Census`), captures the module that is called
-  many times per run with the same shapes, and checks each new shape against eager mode byte for byte. A shape whose
-  capture fails or differs runs in eager mode from then on. The module stays the same object of the same class, with its
-  weights, `state_dict` and hooks unchanged.
+- **`cuda_graphs`** speeds up PyTorch policies whose time goes to launching kernels; a JAX policy such as π0.5 already
+  compiles its kernels into one program. It counts the calls each module gets over a few runs (`Census`), captures the
+  module that is called many times per run with the same shapes, and checks each new shape against eager mode byte for
+  byte. A shape whose capture fails or differs runs in eager mode from then on. The module stays the same object of the
+  same class, with its weights, `state_dict` and hooks unchanged.
   [How do I make a PyTorch robot policy faster without changing its outputs?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
 - **`batcher`** dispatches a batch as soon as it is full, or `wait_ms` after its first call while the model is free.
   While the model is busy, waiting calls accumulate and are dispatched together. Only the listed sizes are used, and a
@@ -198,7 +219,7 @@ seats_user, over_user = seating_user.seat([("near", 30.0), ("far", 200.0)])     
 |---|---|---|---|
 | [`window`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/window.py) | client | Keeps the connection's congestion window across the robot's pauses: BBR on its socket, TCP keepalive, a ping while the connection is idle. | nothing |
 | [`compress`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/compress.py) | client | Compresses an observation's large arrays only where that saves more upload time than it costs. | nothing; zstd where it is installed |
-| [`frames`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/frames.py) | client | Resizes a camera frame to the policy's input size before upload. | Pillow |
+| [`frames`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/frames.py) | both | Sends each picture as JPEG and turns it back into its array on the server; resizes a frame to the policy's input size. | Pillow |
 | [`wifi_power`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/wifi_power.py) | client | Detects Wi-Fi power saving on the robot's link and reports how to disable it. | Linux |
 | [`one_write`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/one_write.py) | server | Sends each HTTP response of a uvicorn server in one write instead of three. | uvicorn |
 | [`tcp_link`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/tcp_link.py) | server | Reads each client's TCP state from the server's kernel: RTT, retransmitted segments, congestion window. | Linux |
@@ -211,7 +232,9 @@ Combined, and for clients you may already use:
 
 | | Side | What it does | Requires |
 |---|---|---|---|
-| [`connect`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/link.py) | client | The client-side components on one connection to your own server. | httpx |
+| [`connect`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/link.py) | client | The client-side components on one connection to your own server, JPEG and compression while the server says it restores them. | httpx |
+| [`lines`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/lines.py) | client | `connect(url, lines=["eth0", "wwan0"])`: each act sent over each of the robot's uplinks, each line bound to its own network interface, and the first answer used; `serve()` runs the policy once for the copies. [How](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-send-each-act-over-two-uplinks.md) | httpx; Linux 5.7 or later, or macOS |
+| [`check`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/check.py) | client | `python -m sequence_ai.check <url>`: which defaults are on between a robot and its server, and what the server is. | httpx |
 | [`openpi`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/openpi.py) | client | The client-side components on the connection held by openpi's own client. | openpi-client |
 | [`lerobot`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/lerobot.py) | both | The Zenoh setting that keeps LeRobot's remote-inference connection from going idle. | lerobot 0.7 |
 | [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench/) | both | Measures your own link: what a pause, a ping and a camera stream cost on it. | nothing |
@@ -258,31 +281,16 @@ Network layer:
 
 [Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) lists every command, and [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench/) measures your own link.
 
-## Limitations
-
-- **`cuda_graphs` helps PyTorch models bound by kernel launches.** A JAX model such as π0.5 already graphs its kernels
-  and gains nothing.
-- **Batching levels off.** On π0.5 the images and prompt are processed for each request, so a batch of 16 gave 1.78×.
-- **Use one replica per GPU.** Two replicas on one GPU gave no more throughput than one.
-- **`slack` batches only policies that leave slack, and computes its capacity on a clock, not on your model under
-  load.** [`examples/fleet_on_a_clock.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/fleet_on_a_clock.py)
-  runs that clock on your own batch times.
-- **The network components fix pauses, not losses.** A ping does not restore a window that losses cut; BBR does. With
-  openpi's own server, which answers no ping during inference, only BBR keeps the window.
-  [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench/) measures your own link.
-
-[Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) has every number and how
-it was taken.
-
 ## Repository layout
 
 ```
 sequence_ai/
-  engine/        inference layer: cuda_graphs · batcher · replicas · slack
+  engine/        inference layer: serve · openpi · cuda_graphs · batcher · replicas · slack
   network/       network layer
                    client: connect · window · compress · frames · wifi_power · openpi
                    server: one_write · ping · tcp_link · compressed
                    both:   msgpack_io · latency_stats · lerobot
+  check.py       python -m sequence_ai.check: which defaults are on between a robot and its server
   ...            the client for General Sequences' GPUs and deployments: connect, gpu, teleop, record
 seq/             the seq command, and the decorators a hosted policy or benchmark is written with
 bench/           measures a link: a TCP client and server, WebSocket, Zenoh
@@ -367,7 +375,7 @@ If you use `sequence-ai` in research, please cite it:
 
 ## License
 
-[Apache-2.0](https://github.com/General-Sequences/sequence-ai/blob/main/LICENSE). Copyright 2026 General Sequences Company. One component is adapted from another project, and the
+[Apache-2.0](https://github.com/General-Sequences/sequence-ai/blob/main/LICENSE). Copyright 2026 General Sequences Company. Parts of two components are adapted from another project, and the
 page `seq eval replay` serves carries others' files: [THIRD_PARTY_NOTICES.md](https://github.com/General-Sequences/sequence-ai/blob/main/THIRD_PARTY_NOTICES.md).
 
 ---
@@ -405,47 +413,24 @@ Save this as `quickstart_server.py`. It is [`examples/quickstart_server.py`](htt
 
 ```python
 import sys
-import time
 
 import numpy as np
-import uvicorn
 
-from sequence_ai.network import compressed, msgpack_io
-from sequence_ai.network.one_write import WholeResponse, one_write_http
+import sequence_ai
 
 
-def policy(observation: dict) -> np.ndarray:
+def policy_user(observation_user: dict) -> dict:
     """Your model here: an observation in, a chunk of actions out. This one returns 8 actions of 7 numbers."""
-    return np.full((8, 7), float(observation["image"].mean()), dtype=np.float32)
+    return {"actions": np.full((8, 7), float(observation_user["image"].mean()), dtype=np.float32)}
 
 
-async def app(scope, receive, send) -> None:
-    body = b""
-    while True:
-        message = await receive()
-        body += message.get("body", b"")
-        if not message.get("more_body"):
-            break
-    response, took_ms = b"", 0.0
-    if scope["path"] == "/act":
-        # msgpack in, arrays as arrays; whatever the robot compressed is decompressed, byte for byte
-        observation, _ = compressed.expand(msgpack_io.unpack(body), limit=64 << 20)
-        started = time.perf_counter()
-        actions = policy(observation)
-        took_ms = (time.perf_counter() - started) * 1000
-        response = msgpack_io.pack({"actions": actions})
-    await send({"type": "http.response.start", "status": 200,
-                "headers": [(b"content-type", msgpack_io.MEDIA_TYPE.encode()),
-                            (b"content-length", str(len(response)).encode()),
-                            (b"server-timing", f"act;dur={took_ms:.1f}".encode())]})
-    await send({"type": "http.response.body", "body": response})
-
+# an observation as your robot sends it: serve() runs the policy on it before it says it is ready
+example_user = {"image": np.zeros((224, 224, 3), dtype=np.uint8), "state": np.zeros(7, dtype=np.float32)}
 
 if __name__ == "__main__":
-    host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-    port = int(sys.argv[2]) if len(sys.argv) > 2 else 8000
-    # what sends each response in one write: WholeResponse around the app, one_write_http() as the protocol
-    uvicorn.run(WholeResponse(app), host=host, port=port, lifespan="off", http=one_write_http())
+    host_user = sys.argv[1] if len(sys.argv) > 1 else None
+    port_user = int(sys.argv[2]) if len(sys.argv) > 2 else 8000
+    sequence_ai.serve(policy_user, host=host_user, port=port_user, example=example_user)
 ```
 
 ```bash
@@ -455,9 +440,18 @@ python quickstart_server.py
 It prints:
 
 ```text
-INFO:     Started server process [73374]
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     serving policy_user on http://0.0.0.0:8000 and http://[::]:8000 (POST /act, GET /ping, GET /example); one observation per call; reads jpeg, zstd, zlib
+WARNING:  no token: anyone who can reach port 8000 can run the policy (serve(token=...) or $SEQ_SERVE_TOKEN asks for one)
+INFO:     Started server process [35969]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     warm-up: one observation took 0.6 ms, then 0.3 ms
+INFO:     ready
 ```
+
+It listens on every address of this machine, and ran the policy on `example_user` before it said `ready`. The warning is
+about the token: [Put your own model and robot in](#put-your-own-model-and-robot-in) has what to do before a robot
+depends on it.
 
 ## 3. Request actions
 
@@ -471,16 +465,17 @@ import numpy as np
 
 import sequence_ai
 
-url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000"
-frame = np.full((224, 224, 3), 128, dtype=np.uint8)        # your camera's frame here
-state = np.zeros(7, dtype=np.float32)                      # your robot's joints here
+url_user = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000"
+frame_user = np.full((224, 224, 3), 128, dtype=np.uint8)        # your camera's frame here
+state_user = np.zeros(7, dtype=np.float32)                      # your robot's joints here
 
-with sequence_ai.connect(url) as link:                     # BBR, TCP keepalive, a ping when idle, msgpack: all on
-    for step in range(3):
-        actions = link.act({"image": frame, "state": state})["actions"]
-        print(f"request {step}: {actions.shape[0]} actions of {actions.shape[1]} numbers, the first {actions[0, :3]}")
-    timing = link.stats()["latency_us"]["act_us"]
-    print(f"{timing['n']} requests, the slowest took {timing['max'] / 1000:.1f} ms")
+with sequence_ai.connect(url_user) as link_user:                # BBR, TCP keepalive, a ping when idle, msgpack: all on
+    for step_user in range(3):
+        actions_user = link_user.act({"image": frame_user, "state": state_user})["actions"]
+        print(f"request {step_user}: {actions_user.shape[0]} actions of {actions_user.shape[1]} numbers, "
+              f"the first {actions_user[0, :3]}")
+    timing_user = link_user.stats()["latency_us"]["act_us"]
+    print(f"{timing_user['n']} requests, the slowest took {timing_user['max'] / 1000:.1f} ms")
 ```
 
 ```bash
@@ -493,57 +488,83 @@ It prints:
 request 0: 8 actions of 7 numbers, the first [128. 128. 128.]
 request 1: 8 actions of 7 numbers, the first [128. 128. 128.]
 request 2: 8 actions of 7 numbers, the first [128. 128. 128.]
-3 requests, the slowest took 2.1 ms
+3 requests, the slowest took 2.6 ms
 ```
 
-That is the first action chunk: 8 actions of 7 numbers. The stand-in `policy` returns the mean of the frame it was
-sent, and the frame is all 128. In the server's terminal, each request is one line:
+That is the first action chunk: 8 actions of 7 numbers. The stand-in `policy_user` returns the mean of the frame it was
+sent, and the frame is all 128. On a Mac on Wi-Fi it also prints one warning first: Wi-Fi power saving can hold a
+robot's packets back, and macOS gives nothing to check it with.
+
+## 4. Check what is on
+
+```bash
+python -m sequence_ai.check http://127.0.0.1:8000
+```
+
+It prints:
 
 ```text
-INFO:     127.0.0.1:51427 - "POST /act HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51427 - "POST /act HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51427 - "POST /act HTTP/1.1" 200 OK
+sequence-ai check: http://127.0.0.1:8000
+
+  ok  server              sequence-ai 0.63.0, pid 35969, up 1 s, policy policy_user; it answers /ping with 200 and restores jpeg, zlib, zstd
+  ok  round trip          1.5 ms for a ping on a kept connection (median of 10); 1.0 ms for a TCP connect
+  ok  send window         macOS keeps a connection's send window through pauses
+  --  BBR                 macOS has no BBR, and needs none for the window
+  --  Wi-Fi power saving  not checked: macOS gives nothing to read it from; this machine's requests go over Wi-Fi (en0), and a wired connection takes the question away
+  ok  pings when idle     connect() pings after each 100.0 ms of idle time, and the server answers them
+  ok  pictures as JPEG    the server restores them, so connect() sends each HxWx3 uint8 array as JPEG: 1 in this observation, 150,658 bytes as arrays, 1,518 with them as JPEG
+  ok  compression         the server restores zlib, zstd, so connect() compresses large arrays with zstd where that saves time
+  --  pings in inference  each act took 1.0 ms, too short to tell
+  ok  server time         the server says it took 0.3 ms of a 1.0 ms act: 0.7 ms outside it, on the network and in this machine
+  ok  first act           1.4 ms, the next ones 1.0 ms (observation from GET /example); connect() waits up to 120 s for the first
 ```
 
-The port after `127.0.0.1:` is the same on all three: the robot kept one connection open and reused it.
+Each `ok` is a part that is on; `--` is one this machine does without, or one this run could not tell (an act of
+1 ms leaves no time to ping inside it); `no` would say what is off and why.
+[What is on by default, and how do I turn each part off?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/what-is-on-by-default.md) has each part.
 
 ## What just ran
 
-On the robot, `connect()` did five things that your code would otherwise have to do:
+On the robot, `connect()` did what your code would otherwise have to do:
 
 | What | Why | Component |
 |---|---|---|
 | Kept one connection open for every request | A new connection for each call costs a handshake each time | [`link`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/link.py) |
 | Requested BBR and enabled TCP keepalive, where the machine allows | Linux restarts a connection's congestion window after a pause; BBR keeps it | [`window`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/window.py) |
 | Sent a small GET whenever the connection was idle for 100 ms | So the connection is never idle between requests | [`window`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/window.py) |
-| Sent the frame as msgpack, its bytes as they are | JSON carries bytes as base64, a third larger on the wire | [`msgpack_io`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/msgpack_io.py) |
+| Sent the frame as JPEG once the server said it reads JPEG | Far fewer bytes: the check's frame, 224×224 of one color, took 1,518 bytes instead of 150,658 | [`frames`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/frames.py) |
+| Sent the rest as msgpack, its bytes as they are | JSON carries bytes as base64, a third larger on the wire | [`msgpack_io`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/msgpack_io.py) |
 | Timed every request | `link.stats()` gives p50, p95 and p99 once there are enough samples | [`latency_stats`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/latency_stats.py) |
 
-On the server, `WholeResponse` and `one_write_http()` put each response in one write
-([`one_write`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/one_write.py)), `compressed.expand` decompresses anything a client compressed, and
-the `server-timing` header tells the robot how long the model itself took.
+On the server, `serve()` ran the policy on a thread of its own, answered each ping at once, turned the JPEG back into
+the array the policy reads, put each response in one write ([`one_write`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/one_write.py)) and
+told the robot how long the policy took (`Server-Timing`). It said what it restores (`X-Seq-Reads`) and what it is
+(`X-Seq-Server`) on every response: that is how the robot knew to send JPEG.
 
 On this machine, a Mac, BBR is not available, so the connection got TCP keepalive only. On loopback none of
 these components saves time: there is no network between the two programs. What each one saves on a real link is in
-the README's [results](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#results), and the links where it saves nothing in its
-[limitations](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#limitations).
+the README's [results](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#results).
 
 ## Put your own model and robot in
 
-1. **Your model.** Replace the body of `policy` in `quickstart_server.py`. It takes the observation the robot sent and
-   returns the actions.
-2. **Your robot.** Replace `frame` and `state` in `quickstart_robot.py` with your camera's frame and your robot's
-   joints, and send the keys your model reads.
-3. **Two machines.** On the GPU, listen on every address; on the robot, give the GPU's address:
+1. **Your model.** Replace the body of `policy_user` in `quickstart_server.py`. It takes the observation the robot sent
+   and returns what the robot needs. A PyTorch model or an openpi policy goes in the same way: [How do I serve a robot
+   policy from my own GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md#your-model-as-a-function)
+2. **Your robot.** Replace `frame_user` and `state_user` in `quickstart_robot.py` with your camera's frame and your
+   robot's joints, and send the keys your model reads. Put one real observation in `example_user` in the server, too.
+3. **Two machines.** The server already listens on every address; on the robot, give the GPU's address:
 
    ```bash
-   python quickstart_server.py 0.0.0.0 8000              # on the GPU
+   python quickstart_server.py                           # on the GPU
    python quickstart_robot.py http://YOUR_GPU:8000       # on the robot
    ```
 
    Run that way between two addresses of one machine, the three requests printed the same lines and the slowest took
-   4.8 ms. This server checks no credentials: open its port only to your robot.
-4. **Measure the link.**
+   3.4 ms.
+4. **A token.** Before a robot depends on it, start the server with one, `SEQ_SERVE_TOKEN=... python
+   quickstart_server.py`, and connect with `sequence_ai.connect(url, token=...)`. Open the port only to your
+   robot as well.
+5. **Measure the link.**
    [How do I measure the link between my robot and my GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-measure-the-link-between-my-robot-and-my-gpu.md)
    tells you which components help on it.
 
@@ -602,16 +623,15 @@ This is the one area where the network layer adds to both, so it is described in
 Why the interval matters: on Linux, a connection that has sent nothing for longer than its retransmission timeout (at
 least its round-trip time (RTT) plus 200 ms) has its congestion window restarted. A ping every 20 seconds, or a frame
 every 1.5 seconds, is longer than that, so neither keeps a window through a robot's sub-second pauses. That is a
-statement about the mechanism. Whether it costs anything depends on the link, and on some links it cost nothing:
-[Why does my robot's upload get slow after a pause?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/why-does-my-robots-upload-get-slow-after-a-pause.md)
+statement about the mechanism. Measure your own link with [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench).
 
 ## Test coverage
 
-| | Tested | Not tested |
-|---|---|---|
-| openpi | `openpi.keep()` on openpi-client 0.1.2's real `WebsocketClientPolicy`, against a stand-in server speaking openpi's protocol on one machine ([`examples/quickstart_openpi.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/quickstart_openpi.py), `tests/network/test_openpi.py`). On a real link: `openpi.keep()`, and a server that pings, on a WebSocket connection of the kind openpi holds, with a stand-in for its client ([Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md)). For the technical report: openpi's policy server (commit `215abfb`, `pi05_droid`, on an L4) and its own client in a closed loop over a home connection, with no network component of this package on the connection; and the same server and client with `openpi.keep()`, from a Linux virtual machine on a home connection ([the table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#openpikeep-with-openpis-own-server-and-client)); and the same server pinging and decoding the pictures as `openpi.patch()` makes it, with the client sending them as JPEG as `openpi.image_tools` does, from a Mac on a home connection ([the table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#pictures-as-jpeg-with-openpis-own-server-and-client)). `openpi.patch()`, the command and `image_tools` against a server module built as openpi's (`tests/network/test_openpi_server.py`) | The server's pings and the JPEG apart; either, and `openpi.keep()`, with openpi's own server on more than one link |
-| LeRobot | The keep-alive file on Zenoh 1.10.2: two idle peers on one machine then sent a frame about every 100 ms each way (`tests/network/test_lerobot.py`). On a real link: two Zenoh peers, with and without the file ([Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md)) | LeRobot's client or server, with or without the file |
-| The components alone | Every measurement in the [README's table](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#results), with the tool in [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench) or the servers named there | Those measurements with openpi or LeRobot as the server |
+| | Tested with |
+|---|---|
+| openpi | `openpi.keep()` on openpi-client 0.1.2's real `WebsocketClientPolicy`, against a stand-in server speaking openpi's protocol on one machine ([`examples/quickstart_openpi.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/quickstart_openpi.py), `tests/network/test_openpi.py`). On a real link: `openpi.keep()`, and a server that pings, on a WebSocket connection of the kind openpi holds, with a stand-in for its client ([Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md)). For the technical report: openpi's policy server (commit `215abfb`, `pi05_droid`, on an L4) and its own client in a closed loop over a home connection, with no network component of this package on the connection; and the same server and client with `openpi.keep()`, from a Linux virtual machine on a home connection ([the table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#openpikeep-with-openpis-own-server-and-client)); and the same server pinging and decoding the pictures as `openpi.patch()` makes it, with the client sending them as JPEG as `openpi.image_tools` does, from a Mac on a home connection ([the table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#pictures-as-jpeg-with-openpis-own-server-and-client)). `openpi.patch()`, the command and `image_tools` against a server module built as openpi's (`tests/network/test_openpi_server.py`) |
+| LeRobot | The keep-alive file on Zenoh 1.10.2: two idle peers on one machine then sent a frame about every 100 ms each way (`tests/network/test_lerobot.py`). On a real link: two Zenoh peers, with and without the file ([Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md)) |
+| The components alone | Every measurement in the [README's table](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#results), with the tool in [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench) or the servers named there |
 
 ## Which should I use?
 
@@ -684,11 +704,11 @@ inference components (`sequence_ai.engine`) are described in the [README](https:
 ```python
 from sequence_ai.network import window
 
-transport = httpx.HTTPTransport(socket_options=window.socket_options())    # BBR and TCP keepalive, where it can
-window.keep(sock)                                                          # or BBR on your own socket
+transport_user = httpx.HTTPTransport(socket_options=window.socket_options())    # BBR and TCP keepalive, where it can
+window.keep(sock_user)                                                          # or BBR on your own socket
 
-warm = window.Warm(ping=lambda: client.get("/ping"))    # a ping while the connection is idle
-warm.used()                                              # each time you send on it
+warm_user = window.Warm(ping=lambda: client.get("/ping"))    # a ping while the connection is idle
+warm_user.used()                                              # each time you send on it
 
 window.check()                                           # warns once: what this machine does after a pause
 ```
@@ -727,9 +747,10 @@ pings in 0.3 s of idle time: 5
 ```python
 from sequence_ai.network import compress, msgpack_io
 
-squeeze = compress.Squeeze()                                  # one per connection
-body = msgpack_io.pack(squeeze.apply(observation))            # large arrays compressed in place, if that saves time
-squeeze.uplink.note(len(body), seconds_the_upload_took)       # so it learns this link's upload rate
+squeeze_user = compress.Squeeze()                                       # one per connection
+# large arrays compressed in place, if that saves time
+body_user = msgpack_io.pack(squeeze_user.apply(observation_user))
+squeeze_user.uplink.note(len(body_user), seconds_the_upload_took_user)  # so it learns this link's upload rate
 ```
 
 An array is compressed with zstd level 1 only while the upload time that saves, at the uplink rate measured on this
@@ -758,9 +779,9 @@ uncompressed.
 ```python
 from sequence_ai.network import frames
 
-frame = frames.resize_image(camera.read(), 224, 224, mode="pad", filter="bilinear")
-data = frames.encode(frame)            # a base64 JPEG
-image = frames.decode(data)            # on the server: the HxWx3 uint8 array its policy reads
+frame_user = frames.resize_image(camera_user.read(), 224, 224, mode="pad", filter="bilinear")
+data_user = frames.encode(frame_user)            # a base64 JPEG
+image_user = frames.decode(data_user)            # on the server: the HxWx3 uint8 array its policy reads
 ```
 
 `"pad"` is openpi's `resize_with_pad`, byte for byte. The mode and the filter have no default and must be passed: a
@@ -800,9 +821,9 @@ Wi-Fi power saving is on: no (or this is not Linux, or not Wi-Fi)
 ```python
 from sequence_ai.network import connect
 
-with connect("http://your-gpu:8000", compress=True) as link:     # compress: only if your server decompresses
-    response = link.act({"image": frame, "state": state})
-    print(link.stats()["latency_us"]["act_us"])                   # the requests' p50, p95 and p99
+with connect("http://your-gpu:8000", compress=True) as link_user:     # compress: only if your server decompresses
+    response_user = link_user.act({"image": frame_user, "state": state_user})
+    print(link_user.stats()["latency_us"]["act_us"])                   # the requests' p50, p95 and p99
 ```
 
 One httpx connection with `window`'s socket options on it, a small GET while it is idle, msgpack both ways, and each
@@ -836,31 +857,26 @@ call. `connect()` keeps one.
 import websockets
 from sequence_ai.network import ping
 
-async with ping.serve(handler, host, port) as server:      # websockets' own server, with a ping every 100 ms
-    await server.serve_forever()
+# websockets' own server, with a ping every 100 ms
+async with ping.serve(handler_user, host_user, port_user) as server_user:
+    await server_user.serve_forever()
 
-async with websockets.serve(handler, host, port, **ping.websockets_options()):    # the same, as its options
+# the same, as its options
+async with websockets.serve(handler_user, host_user, port_user, **ping.websockets_options()):
     ...
 
-uvicorn.run(app, **ping.uvicorn_options())                                         # the same, under uvicorn
+uvicorn.run(app_user, **ping.uvicorn_options())                                         # the same, under uvicorn
 ```
 
 A WebSocket library answers a ping with a pong by itself. A server that pings therefore makes the robot send a few
 bytes each interval, and the robot's kernel never counts the connection idle. Nothing changes on the robot.
 
-**Measured.**
-
-- **Where it helped.** Between machines of one cloud provider, on RTTs of 11.7 and 69.2 ms, an upload after
-  500 ms of silence took 3.0 round trips; with the server pinging every 100 ms it took 1.1 (100 KB and 500 KB) and
-  1.25 (1 MB).
-- **Where it did not.** On a home connection with a cellular uplink, about 36 ms from the GPU, 921,600-byte
-  uploads after 10 s of silence took a median of 264 ms without the pings and 368 ms with them (six each,
-  alternating).
+**Measured.** Between machines of one cloud provider, on RTTs of 11.7 and 69.2 ms, an upload after 500 ms of silence
+took 3.0 round trips; with the server pinging every 100 ms it took 1.1 (100 KB and 500 KB) and 1.25 (1 MB).
 
 A server that answers one HTTP request with one response cannot send anything unsolicited. There the ping comes from the
-robot: `window.Warm`, which `connect()` applies to its connection.
-[How do I keep a WebSocket policy server's connection warm?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-keep-a-websocket-policy-servers-connection-warm.md)
-has the rest.
+robot: `window.Warm`, which `connect()` applies to its connection. [How do I keep a WebSocket policy server's connection
+warm?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-keep-a-websocket-policy-servers-connection-warm.md) has the rest.
 
 `python examples/components/ping.py` printed:
 
@@ -875,16 +891,16 @@ the server measured the connection's RTT from its pings: 0.17 ms
 import uvicorn
 from sequence_ai.network.one_write import WholeResponse, one_write_http
 
-uvicorn.run(WholeResponse(app), http=one_write_http())
+uvicorn.run(WholeResponse(app_user), http=one_write_http())
 ```
 
-`app` is any ASGI app: FastAPI's and Starlette's too.
+`app_user` is any ASGI app: FastAPI's and Starlette's too.
 
 uvicorn writes a response in pieces. A tunnel or proxy in front of the server can delay every piece after the first
 until the client has acknowledged the first, so each request takes one more round trip than necessary.
 
 **Measured.** Behind such a tunnel, with a TCP connect of p50 89.5 ms: headers then body, GET p50 189.7 ms; the same
-response in one write, 106.7 ms. Not measured on a direct connection, and the number of samples was not recorded.
+response in one write, 106.7 ms.
 
 `python examples/components/one_write.py` printed `response: b'ok'`.
 
@@ -893,8 +909,8 @@ response in one write, 106.7 ms. Not measured on a direct connection, and the nu
 ```python
 from sequence_ai.network import tcp_link
 
-tcp_link.read(sock)             # any connected socket
-tcp_link.of(scope["client"])    # in an ASGI app served with one_write_http(): this request's own connection
+tcp_link.read(sock_user)             # any connected socket
+tcp_link.of(scope_user["client"])    # in an ASGI app served with one_write_http(): this request's own connection
 ```
 
 Each returns `rtt_ms`, `rttvar_ms`, `retrans`, `total_retrans`, `cwnd` and, where the kernel provides it,
@@ -912,7 +928,7 @@ this connection, as the server's kernel reports it: None
 ```python
 from sequence_ai.network import compressed, msgpack_io
 
-observation, grew = compressed.expand(msgpack_io.unpack(body), limit=64 << 20)
+observation_user, grew_user = compressed.expand(msgpack_io.unpack(body_user), limit=64 << 20)
 ```
 
 An item whose declared size is smaller than its decompressed size is rejected rather than decompressed past `limit`.
@@ -924,8 +940,8 @@ An item whose declared size is smaller than its decompressed size is rejected ra
 ```python
 from sequence_ai.network import msgpack_io
 
-body = msgpack_io.pack({"image": frame, "state": joints})
-observation = msgpack_io.unpack(body)
+body_user = msgpack_io.pack({"image": frame_user, "state": joints_user})
+observation_user = msgpack_io.unpack(body_user)
 ```
 
 Bytes are sent as bytes and numpy arrays as their raw data, whereas JSON carries bytes as base64, a third larger on the
@@ -944,9 +960,9 @@ arrays returned as arrays: (224, 224, 3) float32
 ```python
 from sequence_ai.network.latency_stats import LatencyStats, now_us
 
-stats = LatencyStats(latencies=["request_us"])
-sent = now_us(); ...; stats.since("request_us", sent)
-stats.snapshot()["latency_us"]["request_us"]    # n, mean, max, p50, p95, p99
+stats_user = LatencyStats(latencies=["request_us"])
+sent_user = now_us(); ...; stats_user.since("request_us", sent_user)
+stats_user.snapshot()["latency_us"]["request_us"]    # n, mean, max, p50, p95, p99
 ```
 
 A percentile is `None` until its window contains enough samples for it: the p99 of 20 samples is only the largest of the
@@ -974,10 +990,10 @@ from openpi_client import websocket_client_policy
 from sequence_ai.network import openpi
 from sequence_ai.network.openpi import image_tools     # in place of openpi_client's: pictures go as JPEG
 
-policy = websocket_client_policy.WebsocketClientPolicy(host, port)
-kept = openpi.keep(policy)             # BBR and TCP keepalive on its socket; a WebSocket ping while it is idle
-observation["observation/image"] = image_tools.resize_with_pad(frame, 224, 224)
-action = policy.infer(observation)     # as before
+policy_user = websocket_client_policy.WebsocketClientPolicy(host_user, port_user)
+kept_user = openpi.keep(policy_user)  # BBR and TCP keepalive on its socket; a WebSocket ping while it is idle
+observation_user["observation/image"] = image_tools.resize_with_pad(frame_user, 224, 224)
+action_user = policy_user.infer(observation_user)     # as before
 ```
 
 In a server script of your own, `openpi.patch()` before it makes openpi's server does what the command does.
@@ -997,7 +1013,7 @@ seconds. One setting makes it every 100 ms:
 ```python
 from sequence_ai.network import lerobot
 
-path = lerobot.keep_alive_file("zenoh-keep-alive.json5")
+path_user = lerobot.keep_alive_file("zenoh-keep-alive.json5")
 ```
 
 Give the file to both sides: the policy server reads it from `zenoh.config_file`, and the robot's remote inference
@@ -1005,8 +1021,7 @@ from `zenoh_config_path`.
 
 Checked: Zenoh 1.10.2 takes the setting, and two idle peers on one machine then sent a frame every 102 ms each way.
 Measured between two Zenoh peers on two cloud machines: a 100 KB request 0.53 s after each response took two to three
-round trips without the file and one with it ([Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md)). Not tested
-with LeRobot's own client and server.
+round trips without the file and one with it ([Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md)).
 [How do I reduce the latency of LeRobot remote inference?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-reduce-the-latency-of-lerobot-remote-inference.md)
 
 ---
@@ -1096,8 +1111,9 @@ Python 3.9 or later.
 Nothing is listening at that address and port. Check, in this order:
 
 1. The server is running, and its log shows the port you gave `connect()`.
-2. The server listens on an address the robot can reach. `127.0.0.1` is reachable from the same machine only: on a
-   GPU elsewhere, start it on `0.0.0.0` (`python quickstart_server.py 0.0.0.0 8000`).
+2. The server listens on an address the robot can reach. `127.0.0.1` is reachable from the same machine only.
+   `serve()` listens on every address unless it is given `host`; a server of your own, on a GPU elsewhere, starts on
+   `0.0.0.0`.
 3. The URL starts with `http://` and has the port: `connect("http://YOUR_GPU:8000")`.
 
 ```text
@@ -1126,14 +1142,18 @@ The host name in the URL does not resolve. Check the spelling, or use the GPU's 
 httpx.ConnectError: [Errno 8] nodename nor servname provided, or not known
 ```
 
-### `httpx.ReadTimeout: timed out`
+### `httpx.ReadTimeout: no response from ... The server may still be running this act`
 
-The server took longer than `timeout` to respond: `connect(url, timeout=60)` waits a minute. A model's first call is
-often its slowest, because it loads or compiles then. If every call is slow, the time is in the model and not in the
-link: the `server-timing` header in the [quickstart's server](https://github.com/General-Sequences/sequence-ai/blob/main/docs/quickstart.md) reports how long the model took.
+The server took longer than the robot waits: up to 120 s for the first act (`first_timeout`), 10 s for the others
+(`timeout`). A model's first inference is often its slowest, because it compiles then. Start the server with
+`serve(policy, example=observation)`, which runs the policy before it says it is ready, and call
+`link.wait_until_ready()` on the robot before it moves. If every call is slow, the time is in the model and not in the
+link: `python -m sequence_ai.check` says how long the server says its model took.
+
+With `timeout=1.0, first_timeout=1.0` against a model that took 3 s (sequence-ai 0.63.0):
 
 ```text
-httpx.ReadTimeout: timed out
+httpx.ReadTimeout: no response from http://127.0.0.1:8013 in 1 s. The server may still be running this act - a model's first inference compiles it, often for tens of seconds - and the next act waits for it first, as long as a first act waits. Wait for the server once, before the robot moves, with wait_until_ready(example=observation), or give connect() a longer first_timeout= (now 1 s) or timeout= (now 1 s)
 ```
 
 ## Sending and reading
@@ -1147,13 +1167,26 @@ The server has no POST at that path. `connect()` posts to `/act` unless told oth
 httpx.HTTPStatusError: Client error '404 Not Found' for url 'http://127.0.0.1:8012/infer'
 ```
 
+### `httpx.HTTPStatusError: Client error '401 Unauthorized'`
+
+The server was started with a token, and the robot sent none or another. Connect with the server's token:
+`sequence_ai.connect(url, token="...")`, the one given to `serve(policy, token=...)` or set as `SEQ_SERVE_TOKEN` on the
+GPU. `wait_until_ready()` says the same of `/ping`. Reproduced with sequence-ai 0.63.0:
+
+```text
+httpx.HTTPStatusError: Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/act'
+```
+
 ### `httpx.HTTPStatusError: Server error '500 Internal Server Error'` after adding `compress=True`
 
-The server does not decompress the arrays. Either add one line where it reads the body, or leave
-`compress=True` off:
+A server of your own does not decompress the arrays. (`serve()` does, and says so, and `connect()` compresses
+nothing for a server that does not say it decompresses; `compress=True` compresses whatever the server says.) Either
+decompress where the server reads the body, or leave `compress=True` off:
 
 ```python
-observation, _ = compressed.expand(msgpack_io.unpack(body), limit=64 << 20)
+from sequence_ai.network import compressed, msgpack_io
+
+observation_user, _ = compressed.expand(msgpack_io.unpack(body_user), limit=64 << 20)
 ```
 
 The robot sees this:
@@ -1250,23 +1283,46 @@ tested with LeRobot's own client and server. See
 
 ## On the server
 
-### `[Errno 48] error while attempting to bind on address ('127.0.0.1', 8000): address already in use`
+### `OSError: [Errno 48] port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine`
 
-Another program has the port. Give the server and the robot another one:
+Another program has the port, often an earlier `serve()` still running: `lsof -nP -iTCP:8000 -sTCP:LISTEN` names it.
+Stop it, or give the server and the robot another port:
 
 ```bash
 python quickstart_server.py 127.0.0.1 8001
 python quickstart_robot.py http://127.0.0.1:8001
 ```
 
+`serve()` (sequence-ai 0.63.0) prints:
+
+```text
+OSError: [Errno 48] port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine (an earlier serve() still running?); stop it, or pass another port
+```
+
+A uvicorn server of your own prints:
+
 ```text
 ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 8000): [errno 48] address already in use
+```
+
+### `ERROR: the policy failed on the example (KeyError: 'camera'): stopping`
+
+`serve()` ran the policy on `example` before saying it is ready, and the policy raised: the server stops, and the
+traceback it raises is the policy's own. Give `example` the keys and shapes your robot sends, or fix the policy. With a
+policy that reads a key the example does not have (sequence-ai 0.63.0):
+
+```text
+ERROR:    the policy failed on the example (KeyError: 'camera'): stopping
+INFO:     Shutting down
+...
+KeyError: 'camera'
 ```
 
 ### My server's log fills with `GET /ping`
 
 That is the robot keeping its connection warm: one small request for each 100 ms the connection is idle, for a
-minute after the last request. Three in 0.35 seconds looked like this:
+minute after the last request. `serve()` writes no line per request; a uvicorn server of your own wrote three in 0.35
+seconds:
 
 ```text
 INFO:     127.0.0.1:52970 - "GET /ping HTTP/1.1" 200 OK
@@ -1325,12 +1381,10 @@ What a network component saves depends on the link:
 
 - On round-trip times (RTTs) of about 101 and 241 ms, a robot sending a request every 0.53 s took no extra round trip
   after its pauses with the default settings, so there was nothing for BBR or a ping to save.
-- On a home connection with a cellular uplink, a server-side ping showed no benefit (a median of 264 ms
-  without it, 368 ms with it, six uploads each).
 - On loopback, or between two machines on one switch, a round trip costs almost nothing, so saving one saves almost
   nothing.
 
-The README has the [results](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#results) and the [limitations](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#limitations).
+The README has the [results](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#results).
 [Measure your own link](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-measure-the-link-between-my-robot-and-my-gpu.md) before and after.
 
 ## `cuda_graphs`
@@ -1349,12 +1403,14 @@ The path names no attribute of your model. Paths are dotted attribute names from
 `cuda_graphs.modules_of(model)` lists them. Use the census to get the path instead of writing it by hand:
 
 ```python
-census = cuda_graphs.Census(cuda_graphs.modules_of(model))
+from sequence_ai.engine import cuda_graphs
+
+census_user = cuda_graphs.Census(cuda_graphs.modules_of(model_user))
 for _ in range(3):
-    model(observation)
-    census.end_act()
-census.close()
-print(census.candidates())        # [{'path': 'denoiser', 'calls': 10, 'ms': 1.05}]
+    model_user(observation_user)
+    census_user.end_act()
+census_user.close()
+print(census_user.candidates())        # [{'path': 'denoiser', 'calls': 10, 'ms': 1.05}]
 ```
 
 The line is printed on a machine with no GPU too, so a mistyped path shows up on a laptop.
@@ -1412,17 +1468,17 @@ arrives. Raise `wait_ms` slightly (the examples use 2 ms), or expect batches onl
 
 ### `TypeError: load must be a function a new process can import: defined at a module's top level, not a lambda and not a function inside another`
 
-Each replica starts in its own process and imports `load` by name. Move it to the top of a module:
+Each replica starts in its own process and imports `load_user` by name. Move it to the top of a module:
 
 ```python
-def load():                       # at the top of a module, not inside main() and not a lambda
-    model = build_model()
-    return model.infer            # what one call runs
+def load_user():                       # at the top of a module, not inside main() and not a lambda
+    model_user = build_model_user()
+    return model_user.infer            # what one call runs
 ```
 
 ### `ReplicaStartFailed: the model's load raised: ...`
 
-Your `load` raised in the replica's process; the text after the colon is its error, and the exception's `traceback`
+Your `load_user` raised in the replica's process; the text after the colon is its error, and the exception's `traceback`
 is the replica's. Run `load()` once in a plain script to see it directly.
 
 ### `ReplicaStartFailed: the model did not load within 900 s`
@@ -1466,7 +1522,7 @@ error. List only the sizes that run.
 ### A replica serves only one robot
 
 The policy leaves no slack: its robot requests the next chunk only when the current one is fully executed, so there
-is no time in which to wait for a batch. See "Limitations" in [`docs/slack.md`](https://github.com/General-Sequences/sequence-ai/blob/main/docs/slack.md).
+is no time in which to wait for a batch. See "Rules and requirements" in [`docs/slack.md`](https://github.com/General-Sequences/sequence-ai/blob/main/docs/slack.md#rules-and-requirements).
 
 ## General
 
@@ -1506,7 +1562,9 @@ the robot's code changes in one line, the address it connects to, and the compon
 that GPU in the same way.
 
 ```python
-link = connect("http://ADDRESS:8000")       # the GPU's address
+import sequence_ai
+
+link_user = sequence_ai.connect("http://ADDRESS:8000")       # the GPU's address
 ```
 
 GPUs are in short supply, and few are near any given robot. [General Sequences](https://generalsequences.com) rents
@@ -1521,8 +1579,16 @@ seq gpu remove <id>                                             # ends it, and i
 ```
 
 The port is open to the address `seq gpu add` was run from; `seq gpu allow <id> <the robot's address>` opens it to the
-robot. This is a paid service, billed while the GPU runs. Everything else on this page, and every component, works the
-same on any other GPU. [Its documentation](https://generalsequences.com/docs/gpus/) has the rest.
+robot, an IPv6 range as well as an IPv4 one. A robot whose address changes, on a cellular or satellite line, gets a
+follow token, `seq gpu follow-token <id> --robot <name>`, and connects with `sequence_ai.connect(url, follow=token)`
+(or `$SEQUENCES_FOLLOW_TOKEN` set): its address of the moment is let in before it connects, and with two uplinks
+(`lines=["eth0", "wwan0"]`) each line's, by a follow that goes out by that line. Over IPv4, a cellular or satellite
+line's public address is usually shared by many of its provider's customers (carrier-grade NAT), and letting that
+address in lets them all in: where `seq gpu list` shows the GPU an IPv6 address, connect to that address or to the
+GPU's name, so that the robot follows over IPv6, and start the server with a token either way.
+
+This is a paid service, billed while the GPU runs. Everything else on this page, and every component, works the same on
+any other GPU. [Its documentation](https://generalsequences.com/docs/gpus/) has the rest.
 
 ## Why near
 
@@ -1549,11 +1615,12 @@ python examples/check_on_a_gpu.py        # the capture, checked against eager mo
 
 ## Before the robot connects
 
-- **The server listens on every address.** `127.0.0.1` is reachable from the GPU itself only:
-  `python quickstart_server.py 0.0.0.0 8000`.
+- **The server listens on every address.** `127.0.0.1` is reachable from the GPU itself only. `serve()` listens on
+  every address unless it is given `host`: `python quickstart_server.py` does.
 - **The port is open to the robot.** A rented GPU's firewall usually admits no one until you open a port. Open the
-  server's port to the address or range the robot connects from. If you open it to everyone, check credentials in your
-  server.
+  server's port to the address or range the robot connects from, or follow the robot's address with `follow=`. If you
+  open it to everyone, start the server with a token: `serve(policy, token="...")`, and `connect(url, token="...")` on
+  the robot.
 
 ## Then measure
 
@@ -1589,10 +1656,12 @@ With the `websockets` library:
 import websockets
 from sequence_ai.network import ping
 
-async with ping.serve(handler, host, port) as server:      # websockets' own server, with a ping every 100 ms
-    await server.serve_forever()
+# websockets' own server, with a ping every 100 ms
+async with ping.serve(handler_user, host_user, port_user) as server_user:
+    await server_user.serve_forever()
 
-async with websockets.serve(handler, host, port, **ping.websockets_options()):    # the same, as its options
+# the same, as its options
+async with websockets.serve(handler_user, host_user, port_user, **ping.websockets_options()):
     ...
 ```
 
@@ -1603,7 +1672,10 @@ it pings each connection the same way, with no change to its files:
 Under uvicorn:
 
 ```python
-uvicorn.run(app, **ping.uvicorn_options())
+import uvicorn
+from sequence_ai.network import ping
+
+uvicorn.run(app_user, **ping.uvicorn_options())
 ```
 
 ```bash
@@ -1665,11 +1737,9 @@ round trips), and pings 250 ms apart did not (2.04). Anything from 25 to 190 ms 
 | the same | 500 KB | 3.0 | 1.1 |
 | the same | 1 MB | 3.0 | 1.25 |
 | Two cloud machines, RTTs of 11, 21, 41 and 81 ms, 40 uploads per cell, over a WebSocket whose server has `ping.websockets_options()` | 100 KB, 0.53 s after each response | 3.3, 2.1, 2.0 and 2.0 round trips | 1.2, 1.1, 1.0 and 1.0 |
-| A home connection with a cellular uplink, about 36 ms from the GPU, six uploads each, alternating | 921,600 bytes after 10 s of silence | a median of 264 ms | 368 ms: no benefit |
 
 A window that the pings do not fill still shrinks. BBR on the robot keeps that one: `window.keep(sock)`, or
-`connect()`. And a ping does not grow a window that packet loss has cut: with 1% loss, 31 and 35 of 40 uploads
-still took one extra round trip with a ping from the client side, and none of 40 with BBR
+`connect()`. With 1% loss, BBR kept the window: none of 40 uploads took an extra round trip
 ([Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#with-1-packet-loss)).
 
 ## When the server cannot ping
@@ -1680,7 +1750,7 @@ unsolicited. There the ping comes from the robot. `connect()` does it by itself:
 ```python
 from sequence_ai.network import connect
 
-link = connect("http://YOUR_GPU:8000")     # a small GET after each 100 ms of idle time
+link_user = connect("http://YOUR_GPU:8000")     # a small GET after each 100 ms of idle time
 ```
 
 **A WebSocket server you cannot change.** Ping from the client side, on the connection your client already holds.
@@ -1692,17 +1762,17 @@ client:
 from websockets.sync.client import connect as ws_connect
 from sequence_ai.network import window
 
-with ws_connect("ws://YOUR_GPU:8000") as ws:
-    window.keep(ws.socket)                               # BBR on its socket, where the machine allows
+with ws_connect("ws://YOUR_GPU:8000") as ws_user:
+    window.keep(ws_user.socket)                               # BBR on its socket, where the machine allows
 
-    def ping() -> None:
-        if not ws.ping().wait(5.0):                      # no pong in 5 s: the connection is gone
+    def ping_user() -> None:
+        if not ws_user.ping().wait(5.0):                      # no pong in 5 s: the connection is gone
             raise TimeoutError("no pong")
 
-    warm = window.Warm(ping)                             # a ping after each 100 ms of idle time
-    ws.send(observation)
-    response = ws.recv()
-    warm.used()                                          # after each request and response
+    warm_user = window.Warm(ping_user)                        # a ping after each 100 ms of idle time
+    ws_user.send(observation_user)
+    response_user = ws_user.recv()
+    warm_user.used()                                          # after each request and response
 ```
 
 Run against a stand-in server on one machine, that client sent four pings in 0.45 seconds of idle time.
@@ -1732,9 +1802,9 @@ actions. It gains nothing on a model that already fuses and graphs its kernels.
 ```python
 from sequence_ai.engine import cuda_graphs
 
-cuda_graphs.install(model, ["action_head.denoiser"])    # model.action_head.denoiser, graphed in place
-model(observation)                                       # a new shape: run in eager mode, captured, checked
-model(observation)                                       # replayed
+cuda_graphs.install(model_user, ["action_head.denoiser"])    # model.action_head.denoiser, graphed in place
+model_user(observation_user)                                       # a new shape: run in eager mode, captured, checked
+model_user(observation_user)                                       # replayed
 ```
 
 Nothing else in your code changes. The module stays where it is in your model, the same object of the same class,
@@ -1770,13 +1840,15 @@ fails or differs runs in eager mode from then on, which is reported once.
 One that is called more than once per run with the same shapes. To find it, count the calls over a few runs:
 
 ```python
-census = cuda_graphs.Census(cuda_graphs.modules_of(model))
+from sequence_ai.engine import cuda_graphs
+
+census_user = cuda_graphs.Census(cuda_graphs.modules_of(model_user))
 for _ in range(3):
-    model(observation)                                   # one inference, as your code makes it
-    census.end_act()
-census.close()
-paths = [row["path"] for row in census.candidates()]    # the outermost and slowest first
-cuda_graphs.install(model, paths[:1])
+    model_user(observation_user)                                   # one inference, as your code makes it
+    census_user.end_act()
+census_user.close()
+paths_user = [row_user["path"] for row_user in census_user.candidates()]    # the outermost and slowest first
+cuda_graphs.install(model_user, paths_user[:1])
 ```
 
 [`examples/graph_a_module.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/graph_a_module.py) does all of it on a small flow-style model, and runs on
@@ -1785,13 +1857,16 @@ a machine with no GPU, where it prints which module it would graph and leaves th
 ## Check it on your GPU
 
 ```python
+import torch
+from sequence_ai.engine import cuda_graphs
+
 torch.manual_seed(0)                                     # a policy that draws noise: the same noise for each run
-eager = model(observation)
-cuda_graphs.install(model, paths[:1])
+eager_user = model_user(observation_user)
+cuda_graphs.install(model_user, paths_user[:1])
 torch.manual_seed(0)
-model(observation)                                       # a new shape: captured, and checked against eager mode here
+model_user(observation_user)  # a new shape: captured, and checked against eager mode here
 torch.manual_seed(0)
-print(cuda_graphs.same(eager, model(observation)))       # True: a replayed run, byte for byte
+print(cuda_graphs.same(eager_user, model_user(observation_user)))       # True: a replayed run, byte for byte
 cuda_graphs.ACTIVE = False                               # the same model in eager mode again, to compare timings
 ```
 
@@ -1807,19 +1882,16 @@ inputs the capture never saw, the model's random noise unchanged, a new batch si
 - **What your model checks about its module still holds:** `isinstance`, its type, its methods and its hooks, which
   fire around a replayed call too.
 
-## Limitations
+## When it applies
 
-- **A model that already fuses and graphs its kernels.** π0.5 under JAX was 98% GPU-busy: there is no launch overhead
-  left to remove. `cuda_graphs` is for PyTorch.
-- **A module called once per run.** There is one launch sequence to save, not many.
-- **Shapes that keep changing.** Each new shape is captured and checked once. A model whose shapes differ on every
-  call spends its time capturing. A prompt of a new length is a new shape, captured the first time it occurs.
-- **No CUDA GPU.** Nothing is graphed, which is reported once, and the model runs as before.
-- **torch before 2.4.** It cannot swap the GPU's random generator during a capture, so nothing is captured.
-- **Measured on two models.** Only GR00T N1.7's DiT and a small test model have been captured this way. LeRobot's
-  policies and openpi's PyTorch models have not been tested with it:
-  [How do I use the inference components with openpi, LeRobot or GR00T?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md)
-  TensorRT and other compilers were not compared.
+- **A PyTorch model that launches many small kernels.** A model that already fuses and compiles its kernels, such as
+  π0.5 under JAX at 98% GPU-busy, has no launch overhead to remove.
+- **A module called many times per run.** A module called once has one launch sequence to save.
+- **Shapes that repeat.** Each new shape is captured and checked once, so a module gains from a shape's second call
+  on. A prompt of a new length is a new shape, captured the first time it occurs.
+- **A CUDA GPU.** Without one, nothing is graphed, which is reported once, and the model runs as before.
+- **torch 2.4 or later,** which lets a capture swap the GPU's random generator; with an earlier torch, nothing is
+  captured.
 
 ---
 
@@ -1941,14 +2013,6 @@ sudo tc qdisc del dev eth0 root
 | the same | 500 KB | 3.0 | 1.1 | 1.1 |
 | the same | 1 MB | 3.0 | 1.25 | 1.3 |
 
-And two results that differed:
-
-- **A home connection.** A robot on a home connection with a cellular uplink, about 36 ms from the GPU, uploading
-  921,600 bytes after 10 s of silence, six uploads each way: a median of 264 ms without the server's pings and 368 ms
-  with them. The pings showed no benefit.
-- **The last hop.** On the same line, a laptop with its Wi-Fi settings page open scanned for networks every 20
-  seconds, and a 30 Hz stream of 50 KB frames went from a median of 43 ms per frame to 181 ms while it scanned.
-
 [`bench/README.md`](https://github.com/General-Sequences/sequence-ai/blob/main/bench/README.md) has these in full, and
 [Why does my robot's upload get slow after a pause?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/why-does-my-robots-upload-get-slow-after-a-pause.md) has the
 table for a robot that sends two requests per second.
@@ -1961,8 +2025,8 @@ server's kernel (Linux):
 ```python
 from sequence_ai.network import tcp_link
 
-tcp_link.read(sock)             # any connected socket: rtt_ms, rttvar_ms, retrans, total_retrans, cwnd
-tcp_link.of(scope["client"])    # in an ASGI app served with one_write_http(): this request's own connection
+tcp_link.read(sock_user)             # any connected socket: rtt_ms, rttvar_ms, retrans, total_retrans, cwnd
+tcp_link.of(scope_user["client"])    # in an ASGI app served with one_write_http(): this request's own connection
 ```
 
 and on the robot, `link.stats()["latency_us"]["act_us"]` gives each request's p50, p95 and p99 as the robot saw them.
@@ -1980,7 +2044,7 @@ has one small component for the last of these, a Zenoh setting, and it is the on
 ```python
 from sequence_ai.network import lerobot
 
-path = lerobot.keep_alive_file("zenoh-keep-alive.json5")     # an idle link then sends a frame every 100 ms
+path_user = lerobot.keep_alive_file("zenoh-keep-alive.json5")     # an idle link then sends a frame every 100 ms
 ```
 
 ```bash
@@ -2010,11 +2074,6 @@ other flags do.
   other's requests. A 100 KB request 0.53 s after each response took 38.1, 44.8, 82.8 and 164.3 ms at round-trip times
   (RTTs) of 11, 21, 41 and 81 ms, and 13.9, 23.2, 42.3 and 82.2 ms with the file on both ends: two to three round trips
   became one, on 40 of 40 requests. [What do the network components save?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) has the table.
-
-## Limitations
-
-- The file has not been tested with LeRobot's own policy server and robot: the measurement used two Zenoh peers.
-- On some links the idle restart costs nothing: see [the README's limitations](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#limitations).
 
 ## Try it
 
@@ -2047,8 +2106,8 @@ is waited for, and a short one drops a robot whose Wi-Fi stalls for a moment.
 **You already have a Zenoh file**, for TLS or access control. LeRobot takes one file, so put both in it:
 
 ```python
-mine = {"transport": {"link": {"tls": {"root_ca_certificate": "ca.pem"}}}}
-path = lerobot.keep_alive_file("zenoh.json5", base=mine)     # your settings, with the keep-alive beside them
+mine_user = {"transport": {"link": {"tls": {"root_ca_certificate": "ca.pem"}}}}
+path_user = lerobot.keep_alive_file("zenoh.json5", base=mine_user)     # your settings, with the keep-alive beside them
 ```
 
 Zenoh 1.10.2 loaded that file with both settings in it.
@@ -2067,8 +2126,7 @@ measurements, including the links where the pause cost nothing.
 [Measure it](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-measure-the-link-between-my-robot-and-my-gpu.md), and if the GPU is far,
 [get one nearer](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-get-a-gpu-near-my-robot.md).
 
-**LeRobot's own settings.** These are LeRobot's, from the `RemoteInferenceConfig` of 0.7.0, and were not measured
-here:
+**LeRobot's own settings.** These are LeRobot's, from the `RemoteInferenceConfig` of 0.7.0:
 
 | Setting | Default | What it is |
 |---|---|---|
@@ -2123,10 +2181,12 @@ from openpi_client import websocket_client_policy
 from sequence_ai.network import openpi
 from sequence_ai.network.openpi import image_tools      # was: from openpi_client import image_tools
 
-policy = websocket_client_policy.WebsocketClientPolicy(host="YOUR_GPU", port=8000)
-kept = openpi.keep(policy)                               # keeps the connection warm
-observation["observation/exterior_image_1_left"] = image_tools.resize_with_pad(frame, 224, 224)    # now a JPEG
-action_chunk = policy.infer(observation)["actions"]     # openpi's own call, unchanged
+policy_user = websocket_client_policy.WebsocketClientPolicy(host="YOUR_GPU", port=8000)
+# keeps the connection warm
+kept_user = openpi.keep(policy_user)
+observation_user["observation/exterior_image_1_left"] = image_tools.resize_with_pad(frame_user, 224, 224)  # now a JPEG
+# openpi's own call, unchanged
+action_chunk_user = policy_user.infer(observation_user)["actions"]
 ```
 
 ```bash
@@ -2161,7 +2221,8 @@ JPEG makes the upload itself smaller: two 224 x 224 pictures are 301,056 bytes a
 `kept.warm.pings` how many pings were answered. `kept.close()` stops the pings; the connection stays openpi's.
 
 In a server script of your own, call `openpi.patch()` before it makes openpi's `WebsocketPolicyServer`: that is what the
-command does before it runs `scripts/serve_policy.py`.
+command does before it runs `scripts/serve_policy.py`. `patch()` needs openpi's own `websocket_policy_server.py`; any
+other server is refused with `TypeError`.
 
 ## Try it without a GPU or a checkpoint
 
@@ -2187,10 +2248,45 @@ Twelve pings is four in each of the three half-second pauses. BBR is `False` bec
 
 Against a real openpi server, [`examples/openpi_robot.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/openpi_robot.py) takes its host and port.
 
+## Or serve the policy with `serve()`
+
+To serve several robots in batches, or to give the robot `connect()` in place of openpi's client, serve the policy with
+`sequence_ai.serve()` in openpi's environment on the GPU:
+
+```python
+from openpi.policies import policy_config
+from openpi.training import config as openpi_config
+
+import sequence_ai
+from sequence_ai.engine import openpi
+
+policy_user = policy_config.create_trained_policy(openpi_config.get_config("pi05_droid"), checkpoint_dir_user)
+sequence_ai.serve(openpi.batched(policy_user), batch=[1, 2, 4, 8], example=observation_user)  # or serve(policy.infer)
+```
+
+On the robot, the observation keeps openpi's keys, and `act()` returns what openpi's `infer()` returns:
+
+```python
+import sequence_ai
+
+link_user = sequence_ai.connect("http://YOUR_GPU:8000")
+# observation["observation/exterior_image_1_left"]: the frame
+action_chunk_user = link_user.act(observation_user)["actions"]
+```
+
+`openpi.batched(policy)` passes each observation through the policy's transforms, as `infer()` does, and samples all of
+them in one call, each with its own noise. The policy's JAX model compiles each listed batch size once, in the warm-up
+on `example`. A PyTorch checkpoint runs its observations one by one. Every default of [What is on by
+default](https://github.com/General-Sequences/sequence-ai/blob/main/docs/what-is-on-by-default.md) applies: the robot sends each 224×224 picture as JPEG, the server turns it back into
+the array the policy reads. At quality 95, JPEG moved π0.5's actions by 5.9% on average, a tenth of the policy's own
+run-to-run noise; `jpeg=False` sends exact pixels.
+
 ## Tested
 
 - **Verified:** `openpi.keep()` against openpi-client 0.1.2 on a local connection, as above and in
   `tests/network/test_openpi.py`.
+- **Verified:** `openpi.batched()` against stand-ins of openpi's model and transforms: one call to the model per
+  batch, each observation's own transforms and output (`tests/engine/test_openpi.py`).
 - **Verified:** the server's pings and its decoding, and `image_tools`, against a server module built as openpi's
   `websocket_policy_server.py` is, on a local connection; and the command, against a script run as
   `scripts/serve_policy.py` is (`tests/network/test_openpi_server.py`).
@@ -2209,23 +2305,6 @@ Against a real openpi server, [`examples/openpi_robot.py`](https://github.com/Ge
   robot a simulated arm on a Mac on a home connection, the server pinging. Each request's upload went from 301.5 KB to
   18.8 KB, and the time it spent outside the server, beyond one RTT, from about 97 to about 21 ms at the median.
   [The table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#pictures-as-jpeg-with-openpis-own-server-and-client).
-
-## Limitations
-
-- With openpi's own policy server, `keep()` has been measured on one link only: two 45 s episodes per setting, from a
-  Linux virtual machine on a home connection. In the episode that lost packets it was no better than without it.
-- The pictures as JPEG have been measured in one episode, against one with arrays, and together with the server's
-  pings: the two were not measured apart.
-- In that run the server took about 20 ms longer for each inference than when openpi's own command started it, with or
-  without the pings and the decoding. It was started through another script, as `python -m` starts it, and why that
-  costs time is not known. `openpi.patch()` in a server script of your own starts nothing through another script; it
-  has not been measured.
-- A JPEG is not the frame it was made from: at quality 95 it moved a π0.5 policy's actions by 5.9% on average over 50
-  real observations, about a tenth of what the policy's own sampling noise does
-  ([`frames.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/frames.py) has the measurement).
-- `patch()` changes openpi's server through its module's `_server` and its `WebsocketPolicyServer`, as openpi's
-  `websocket_policy_server.py` has them: a version built otherwise is refused with a `TypeError`, not changed.
-- The README's [limitations](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#limitations) list the links where the idle restart costs nothing.
 
 ## What openpi already does
 
@@ -2268,44 +2347,208 @@ covers the case where you have none nearby. The robot's code changes in one plac
 
 ---
 
+Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-send-each-act-over-two-uplinks.md
+
+# How do I send each act over two uplinks?
+
+A robot with two ways out - a Starlink terminal and a cellular modem, say - can send each act over both and use
+whichever answer comes back first. A slow moment on one line then costs nothing while the other is quick, and a line
+that drops leaves the acts to the other.
+
+```python
+import sequence_ai
+
+robot_user = sequence_ai.connect("http://YOUR_GPU:8000", lines=["eth0", "wwan0"])   # one connection by each interface
+robot_user.wait_until_ready()
+action_user = robot_user.act(observation_user)               # sent on both lines; the first answer
+print(robot_user.stats()["lines"])                           # each line's acts, first answers and errors
+```
+
+`lines=` names two or more of the robot's network interfaces, one uplink each, for a policy server at an address: one
+started with `serve()` on your own GPU, or on a GPU you rent. `ip link` lists a Linux machine's interfaces, and
+`ifconfig` a Mac's; a name the machine does not have is refused with the names it has.
+
+## What it does
+
+- **Each act goes on every line at once.** The observation is packed once, and the same body goes on each line's own
+  connection, bound to its interface before it connects, so it leaves by that line whatever the default route.
+- **The first answer is used.** The others are read when they come. An act fails only when every line has failed.
+- **The policy runs once.** The copies of an act carry one request id, `X-Seq-Request-Id`; `serve()` runs the policy
+  once for them and gives each copy that answer, and says so with `once` in its `X-Seq-Reads` header. To a server
+  that does not say `once`, each act goes on one line alone, the first that is free, and on the next only when that
+  one could not connect: an act is never run twice.
+- **A line that stops answering collects no queue.** A line still carrying the act before is not given the next one.
+- **Each line stays warm.** Each line's connection keeps its own pings when idle, as one connection does
+  ([What is on by default](https://github.com/General-Sequences/sequence-ai/blob/main/docs/what-is-on-by-default.md)).
+
+Where the server has another address by each line - IPv6 on one, IPv4 alone on the other - name each line's:
+
+```python
+robot_user = sequence_ai.connect(url_user, lines={"eth0": "http://[2001:db8::7]:8000",     # IPv6 by the terminal
+                                                  "wwan0": "http://203.0.113.7:8000"})     # IPv4 by the modem
+```
+
+With an address by each line, each act first compares the servers the lines' pings named: where their process, version
+or start time differ, the lines reach two servers, and the act raises `ValueError` and is sent on none.
+
+## On a GPU rented from General Sequences
+
+With a follow token, each line's address is let into the GPU's allow list before the robot connects, each by a follow
+that goes out by that line:
+
+```python
+robot_user = sequence_ai.connect("http://YOUR_GPU:8000", follow=follow_token_user, lines=["eth0", "wwan0"])
+```
+
+`seq gpu follow --line wwan0` does the same for one line from a shell, and `seq gpu list` says where each line was let
+in from. [How do I get a GPU near my robot?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-get-a-gpu-near-my-robot.md) has the follow token.
+
+A line follows over the address family it reaches the GPU by. Over IPv4, a cellular or satellite line's public address
+is usually shared by many of its provider's customers (carrier-grade NAT), and letting that address in lets them all in.
+Where `seq gpu list` shows the GPU an IPv6 address, connect to that address or to the GPU's name, so that each line
+with IPv6 follows over it; and start the server with a token either way (`serve(policy, token=...)`).
+
+## What it costs
+
+Every act's body is sent on each line: two lines, twice the upload. Two cameras' pictures as JPEG are about 24 KB an
+act ([`frames.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/frames.py) has the measurement), so a policy asked every 533 ms, as π0.5 is,
+sends about 160 MB an hour on each line. On a line billed by the gigabyte, count it. The answers come back on each line
+too, but an answer is a chunk of actions, small beside the pictures.
+
+## Check both lines
+
+```bash
+python -m sequence_ai.check http://YOUR_GPU:8000 --lines eth0,wwan0
+```
+
+Beside its other lines, it pings the server by each interface and says whether the server runs an act's copies once.
+With an observation (the server's example, or `--observation FILE`), it sends 5 acts on every line and says how many
+each line answered first, and how many megabytes an hour each line sends at one act a second.
+
+## Needs
+
+Linux 5.7 or later, or macOS: no root, since either lets a program bind its own socket to an interface. A policy
+reached by its deployment's name is reached over one line.
+
+---
+
 Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md
 
 # How do I serve a robot policy from my own GPU?
 
-Put your model behind a small HTTP server on the GPU and call it from the robot with `connect()`. Everything here is
+Give your model to `sequence_ai.serve()` as a function, and call it from the robot with `connect()`. Everything here is
 open source and runs on a GPU you already have: no account and no service of ours is involved.
 
 On the GPU:
 
-```bash
-pip install sequence-ai
-python quickstart_server.py 0.0.0.0 8000
+```python
+import sequence_ai
+
+def policy_user(observation_user):                    # your model: one observation in, what the robot needs out
+    return {"actions": model_user(observation_user["image"], observation_user["state"])}
+
+sequence_ai.serve(policy_user, port=8000, example=observation_user)
 ```
 
 On the robot:
 
 ```python
-from sequence_ai.network import connect
+import sequence_ai
 
-link = connect("http://YOUR_GPU:8000")                    # BBR, TCP keepalive, a ping when idle, msgpack: all on
-actions = link.act({"image": frame, "state": state})["actions"]
+link_user = sequence_ai.connect("http://YOUR_GPU:8000")
+actions_user = link_user.act({"image": frame_user, "state": state_user})["actions"]
 ```
 
-[`quickstart_server.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/quickstart_server.py) is one short file with a function named `policy` that you
-replace with your model. The [Quickstart](https://github.com/General-Sequences/sequence-ai/blob/main/docs/quickstart.md) runs both sides on one machine first, with the output of each
+Both sides' defaults are on: the robot sends pictures as JPEG and compresses large arrays where that saves time, keeps
+its one connection warm with pings, and waits longer for the first answer; the server runs the policy on a thread of
+its own, answers pings at once, warms the policy up on `example`, and sends torch and JAX outputs back as numpy arrays.
+[What is on by default, and how do I turn each part off?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/what-is-on-by-default.md) lists every part with its switch,
+and `python -m sequence_ai.check http://YOUR_GPU:8000` says which are on between your robot and your server.
+
+[`quickstart_server.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/quickstart_server.py) is this server in one short file, with a stand-in
+`policy_user` to replace. The [Quickstart](https://github.com/General-Sequences/sequence-ai/blob/main/docs/quickstart.md) runs both sides on one machine first, with the output of each
 step. Run between two addresses of one machine, the robot printed:
 
 ```text
 request 0: 8 actions of 7 numbers, the first [128. 128. 128.]
 request 1: 8 actions of 7 numbers, the first [128. 128. 128.]
 request 2: 8 actions of 7 numbers, the first [128. 128. 128.]
-3 requests, the slowest took 4.8 ms
+3 requests, the slowest took 3.4 ms
 ```
+
+## Your model, as a function
+
+`serve()` takes any model as a function. It is called with the observation the robot sent, a dict with numpy arrays as
+arrays, and returns what the robot gets back: a dict, an array or a list, with numpy arrays, torch tensors or JAX
+arrays in it.
+
+Return an action chunk: the steps the robot plays while it asks for the next one. A policy that returns one step at a
+time, a network round trip away, leaves a 30 Hz arm waiting for each step: OpenVLA, which returns one step, held a
+simulated arm still for all 1,200 steps of a 40 s run.
+
+| Your model | What to pass |
+|---|---|
+| A function of one observation | `serve(policy)` |
+| A function of a list of observations, one forward pass for all of them | `serve(policy_on_a_list, batch=[1, 2, 4, 8])` |
+| openpi (π0, π0.5) | `serve(policy.infer)`, or batched: `serve(openpi.batched(policy), batch=[1, 2, 4, 8])` |
+| A PyTorch module: LeRobot's, GR00T's, your own | a function that turns the observation into the module's inputs and calls it |
+
+A PyTorch module, as [`serve_a_pytorch_model.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/serve_a_pytorch_model.py) serves one:
+
+```python
+import torch
+
+@torch.inference_mode()
+def policy_user(observation_user):
+    # 1x3xHxW
+    image_user = torch.as_tensor(observation_user["image"], device="cuda").permute(2, 0, 1)[None].float() / 255
+    state_user = torch.as_tensor(observation_user["state"], device="cuda")[None]
+    return {"actions": model_user(image_user, state_user)[0]}            # a tensor: serve() sends it as a numpy array
+
+sequence_ai.serve(policy_user, example=observation_user)
+```
+
+Run on a CPU, its robot printed:
+
+```text
+a ndarray of shape (8, 7) and dtype float32 from the model on the cpu: the first [ 0.0413 -0.3051  0.1673]
+```
+
+An openpi policy, batched:
+
+```python
+from openpi.policies import policy_config
+from openpi.training import config as openpi_config
+
+import sequence_ai
+from sequence_ai.engine import openpi
+
+policy_user = policy_config.create_trained_policy(openpi_config.get_config("pi05_droid"), checkpoint_dir_user)
+sequence_ai.serve(openpi.batched(policy_user), batch=[1, 2, 4, 8], example=observation_user)
+```
+
+`openpi.batched(policy)` is openpi's own `infer()` for a list of observations: each passes through the policy's
+transforms, and the model samples all of them in one call. [`openpi.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/openpi.py) has the
+details.
+
+**Batching.** With `batch=[1, 2, 4, 8]`, the observations that wait while the policy runs reach it together, in the
+largest listed size they fill, and each robot gets its own output back. Five robots acting at the same moment against
+[`components/serve.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/components/serve.py) printed:
+
+```text
+5 robots, each with its own actions: the first of each [0.0, 1.0, 2.0, 3.0, 4.0]
+the warm-up ran batches of [1, 1, 2, 2, 4, 4, 8, 8]; the robots' acts reached the model as batches of [4, 1]
+```
+
+The batches depend on when the requests arrive: on another run the same five came as `[2, 2, 1]`. List the sizes your
+model is compiled or graphed for: a batch of an unlisted size is never sent to it. Batching serves several robots in
+fewer forward passes; one robot's request is no faster for it.
 
 ## You already have a server
 
 Keep it. `connect()` needs two things from a server: a POST that takes a msgpack body and responds with msgpack or
-JSON, and any cheap GET for its ping. In a FastAPI app that is two handlers, and two more names where uvicorn starts:
+JSON, and any cheap GET for its ping. To get the rest of the defaults, a server also says what it restores in an
+`X-Seq-Reads` header and restores it, and says it is a sequence-ai server in `X-Seq-Server`. In a FastAPI app:
 
 ```python
 import asyncio
@@ -2314,34 +2557,39 @@ import numpy as np
 import uvicorn
 from fastapi import FastAPI, Request, Response
 
-from sequence_ai.network import compressed, msgpack_io
+from sequence_ai.network import compressed, frames, msgpack_io
 from sequence_ai.network.one_write import WholeResponse, one_write_http
 
-app = FastAPI()
+app_user = FastAPI()
+# so the robot sends JPEG, compressed
+SAYS_user = {"X-Seq-Reads": "jpeg, zstd, zlib", "X-Seq-Server": "sequence-ai/0.63.0"}
 
 
-def policy(observation: dict) -> np.ndarray:
-    return np.full((8, 7), float(observation["image"].mean()), dtype=np.float32)      # your model here
+def policy_user(observation_user: dict) -> np.ndarray:
+    return np.full((8, 7), float(observation_user["image"].mean()), dtype=np.float32)      # your model here
 
 
-@app.post("/act")
-async def act(request: Request) -> Response:
-    observation, _ = compressed.expand(msgpack_io.unpack(await request.body()), limit=64 << 20)
-    actions = await asyncio.to_thread(policy, observation)          # the model runs off the event loop
-    return Response(msgpack_io.pack({"actions": actions}), media_type=msgpack_io.MEDIA_TYPE)
+@app_user.post("/act")
+async def act_user(request_user: Request) -> Response:
+    observation_user, _ = compressed.expand(msgpack_io.unpack(await request_user.body()), limit=64 << 20)
+    observation_user = frames.unpack_pictures(observation_user)               # each picture sent as JPEG, as its array
+    actions_user = await asyncio.to_thread(policy_user, observation_user)          # the model runs off the event loop
+    return Response(msgpack_io.pack({"actions": actions_user}), media_type=msgpack_io.MEDIA_TYPE, headers=SAYS_user)
 
 
-@app.get("/ping")
-async def ping() -> Response:
-    return Response()                                               # all the robot's ping needs: an empty response
+@app_user.get("/ping")
+async def ping_user() -> Response:
+    return Response(headers=SAYS_user)                                   # all the robot's ping needs: an empty response
 
 
 if __name__ == "__main__":
-    uvicorn.run(WholeResponse(app), host="127.0.0.1", port=8000, http=one_write_http())
+    uvicorn.run(WholeResponse(app_user), host="0.0.0.0", port=8000, http=one_write_http())
 ```
 
-This file was run with FastAPI 0.163 against the quickstart's robot: three requests answered, and with
-`connect(url, compress=True)` three more, with three pings between them.
+This file was run with FastAPI 0.163 against the quickstart's robot: three requests answered, the second and third with
+their picture sent as JPEG (the first left before the robot had heard what the server reads; `link.wait_until_ready()`
+hears it first). `asyncio.to_thread` runs the model on a pool of threads, so two robots' requests can run it at once;
+`serve()` runs it on one thread, one call at a time.
 
 Your paths can have other names: `connect(url, act_path="/infer", ping_path="/healthz")`.
 
@@ -2353,11 +2601,11 @@ Keep that too, and take single components. Each is one file and imports no other
 import httpx
 from sequence_ai.network import window
 
-transport = httpx.HTTPTransport(socket_options=window.socket_options())    # BBR and TCP keepalive, where it can
-client = httpx.Client(base_url="http://YOUR_GPU:8000", transport=transport)
+transport_user = httpx.HTTPTransport(socket_options=window.socket_options())    # BBR and TCP keepalive, where it can
+client_user = httpx.Client(base_url="http://YOUR_GPU:8000", transport=transport_user)
 
-warm = window.Warm(ping=lambda: client.get("/ping"))     # a ping while the connection is idle
-warm.used()                                              # call it each time you send on the connection
+warm_user = window.Warm(ping=lambda: client_user.get("/ping"))     # a ping while the connection is idle
+warm_user.used()                                              # call it each time you send on the connection
 ```
 
 Run against the quickstart's server, those lines sent four pings in 0.45 seconds of idle time. One thing `connect()`
@@ -2376,8 +2624,8 @@ A component saves time only on a link that has the cost it removes. Measure befo
 |---|---|---|
 | A short round-trip time (round-trip time (RTT), about 21 ms) and pauses between requests | `connect()`, or `window` on your own client | 40 of 40 requests took one extra round trip without BBR, none with it |
 | A longer RTT (about 101 or 241 ms), no loss | nothing for the pauses | 0 or 1 of 40 requests took an extra round trip with the default settings |
-| A tunnel or proxy in front of the server | `one_write` | GET p50 189.7 ms with headers and body written apart, 106.7 ms in one write; not measured on a direct connection |
-| Large raw arrays on a slow uplink | `compress=True` and `compressed.expand` | 172,800-byte frames came out about 1.9 times smaller for 0.37 ms |
+| A tunnel or proxy in front of the server | `one_write` | GET p50 189.7 ms with headers and body written apart, 106.7 ms in one write |
+| Large raw arrays on a slow uplink | compression, on by default with `serve()` | 172,800-byte frames came out about 1.9 times smaller for 0.37 ms |
 | A new connection for each call | keep one open, as `connect()` does | 305.9 ms per call with a new connection, 121.0 ms reusing one |
 
 The conditions behind each row are in the [README](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#results).
@@ -2386,20 +2634,96 @@ shows how to get the same numbers for your own link.
 
 ## Before a robot depends on it
 
-- **Credentials.** The quickstart's server checks none. Open its port only to your robot's address, or check a header
-  in your handler: `connect(url, headers={"authorization": "..."})` sends one with every request.
-- **Timeout.** `connect()` waits 10 seconds for a response. A model that loads or compiles on its first call needs more:
-  `connect(url, timeout=60)`.
-- **Several robots on one GPU.** One request at a time is one forward pass each. The inference layer has `batcher`,
-  which batches the waiting requests into one call to the model, and `replicas`, which runs one replica of the model per
-  GPU: [How many robots can one GPU serve?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-many-robots-can-one-gpu-serve.md)
+- **A token.** `serve()` with no token runs the policy for anyone who can reach its port, and says so when it starts.
+  Start it with `serve(policy, token="...")` (or set `SEQ_SERVE_TOKEN` on the GPU) and connect with
+  `sequence_ai.connect(url, token="...")`; open the port only to your robot's address as well.
+- **The first answer.** A model compiled on its first inference takes tens of seconds. `serve(example=...)` runs it
+  before the server says it is ready, `link.wait_until_ready()` waits for that on the robot, and `connect()` gives the
+  first act 120 s in any case.
+- **Several robots on one GPU.** `serve(..., batch=[1, 2, 4, 8])`, above. One replica of a model per GPU:
+  [How many robots can one GPU serve?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-many-robots-can-one-gpu-serve.md)
 - **No GPU near the robot.** [How do I get a GPU near my robot?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-get-a-gpu-near-my-robot.md)
 
 ## See also
 
+- [What is on by default, and how do I turn each part off?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/what-is-on-by-default.md)
 - [Quickstart](https://github.com/General-Sequences/sequence-ai/blob/main/docs/quickstart.md)
 - [FAQ](https://github.com/General-Sequences/sequence-ai/blob/main/docs/faq.md), for the errors a first run can print
 - [Comparison with openpi's and LeRobot's remote inference](https://github.com/General-Sequences/sequence-ai/blob/main/docs/comparison.md)
+
+---
+
+Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-serve-my-own-model.md
+
+# How do I serve my own model?
+
+`serve()` wraps any policy whose call returns an action chunk; nothing in the model changes.
+
+The model is loaded and called the way its own README does it, inside a function of one observation, and `serve()`
+serves that function. Below is Octo (`octo-base-1.5`, under JAX), written from Octo's README alone.
+
+## On the GPU
+
+Install Octo as its README says, and `pip install sequence-ai` beside it. Then:
+
+```python
+import jax
+import numpy as np
+from PIL import Image
+from octo.model.octo_model import OctoModel
+
+import sequence_ai
+
+model_user = OctoModel.load_pretrained("hf://rail-berkeley/octo-base-1.5")      # as Octo's README loads it
+calls_user = [0]
+
+
+def policy_user(observation_user):
+    calls_user[0] += 1
+    image_user = np.asarray(Image.fromarray(observation_user["image"]).resize((256, 256)))   # this model's size
+    task_user = model_user.create_tasks(texts=[observation_user["prompt"]])
+    actions_user = model_user.sample_actions(
+        {"image_primary": image_user[None, None], "timestep_pad_mask": np.array([[True]])},  # a history of one
+        task_user, rng=jax.random.PRNGKey(calls_user[0]))
+    return {"actions": np.asarray(actions_user, dtype=np.float32)[0]}                 # a chunk: 4 steps of 7
+
+
+example_user = {"image": np.zeros((224, 224, 3), np.uint8), "prompt": "pick up the black block and put it in the box"}
+sequence_ai.serve(policy_user, example=example_user)
+```
+
+`example=` is run before the server answers its first robot, so JAX compiles the model then, not on a robot's first
+request. The observation is the one Octo's README names: `image_primary` with a history of one, and
+`timestep_pad_mask`. The actions are what `sample_actions` returns.
+
+## On the robot
+
+```python
+import sequence_ai
+
+robot_user = sequence_ai.connect("http://YOUR_GPU:8000")
+robot_user.wait_until_ready()
+prompt_user = "pick up the black block and put it in the box"
+chunk_user = robot_user.act({"image": frame_user, "prompt": prompt_user})["actions"]      # frame_user: the camera's
+```
+
+`chunk_user` is the 4 x 7 chunk the policy returned. The picture goes as JPEG and comes back to the policy as the
+array it reads, as [What is on by default](https://github.com/General-Sequences/sequence-ai/blob/main/docs/what-is-on-by-default.md) says.
+
+## Return an action chunk
+
+The robot plays a chunk while it asks for the next one, so a round trip can pass while the arm moves. A policy that
+returns one step at a time leaves the arm waiting for each step:
+[How do I serve a robot policy from my own GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md#your-model-as-a-function)
+
+## A PyTorch model
+
+The same function, with the model's PyTorch call inside it:
+[How do I serve a robot policy from my own GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md#your-model-as-a-function)
+has a PyTorch module, [How do I make a PyTorch robot policy faster without changing its
+outputs?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md) has GR00T, and [How do I
+reduce the latency of LeRobot remote inference?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-reduce-the-latency-of-lerobot-remote-inference.md) has
+LeRobot's policies.
 
 ---
 
@@ -2422,42 +2746,54 @@ What follows is where each component goes and what was measured on the models th
 ```python
 from sequence_ai.engine import cuda_graphs
 
-census = cuda_graphs.Census(cuda_graphs.modules_of(policy))
+census_user = cuda_graphs.Census(cuda_graphs.modules_of(policy_user))
 for _ in range(3):
-    policy_answer = run_policy(policy, observation)      # one inference, as your code makes it
-    census.end_act()
-census.close()
-paths = [row["path"] for row in census.candidates()]    # the module called many times per run comes first
-cuda_graphs.install(policy, paths[:1])                   # from here on, replayed and checked byte for byte
+    policy_answer_user = run_policy_user(policy_user, observation_user)      # one inference, as your code makes it
+    census_user.end_act()
+census_user.close()
+# the module called many times per run comes first
+paths_user = [row_user["path"] for row_user in census_user.candidates()]
+cuda_graphs.install(policy_user, paths_user[:1])  # from here on, replayed and checked byte for byte
 ```
 
 Measured: GR00T N1.7 on an L4, its DiT captured, 224 ms to 146 ms per run, with exactly the same outputs on inputs it
 was not captured on. The census shows in three runs whether your model has a module worth graphing, and
 [`examples/check_on_a_gpu.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/check_on_a_gpu.py) shows how to compare every output with eager mode's on
-your GPU.
-[How do I make a PyTorch robot policy faster without changing its outputs?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
+your GPU. [How do I make a PyTorch robot policy faster without changing its
+outputs?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
 
 ## openpi and LeRobot: more than one robot on a GPU
 
 openpi's policy server calls the model once for each request, with no batching across connections, and LeRobot 0.7's
 policy server holds one robot session (both verified in their source code:
 [the comparison page](https://github.com/General-Sequences/sequence-ai/blob/main/docs/comparison.md)). To
-serve several robots in one forward pass, the requests must reach the model as a batch, which requires your own
-handler around the model's batched call:
+serve several robots in one forward pass, the requests must reach the model as a batch. With `serve()` that is one
+argument, and for an openpi policy `openpi.batched(policy)` is the batched call:
+
+```python
+import sequence_ai
+from sequence_ai.engine import openpi
+
+sequence_ai.serve(openpi.batched(policy_user), batch=[1, 2, 4], example=observation_user)
+```
+
+In a server of your own, a handler around the model's batched call does the same:
 
 ```python
 from sequence_ai.engine.batcher import Batcher
 
-batcher = Batcher(infer_a_batch, sizes=[1, 2, 4], wait_ms=2.0)    # infer_a_batch(observations: list) -> list
-output = await batcher(observation)                                # in each connection's handler
+# infer_a_batch_user(observations: list) -> list
+batcher_user = Batcher(infer_a_batch_user, sizes=[1, 2, 4], wait_ms=2.0)
+output_user = await batcher_user(observation_user)  # in each connection's handler
 ```
 
-You write `infer_a_batch`: it stacks the observations, calls the model once, and splits the output. For an openpi
-policy that is each observation through the policy's input transform, the results stacked, one call of the model's
-`sample_actions`, and each row through the output transform. Measured on π0.5 on an L4 with the model's own batched
-call: 5.99 requests per second at batch 1 and 10.66 at batch 16. That model's time is mostly in its prefix, which
-batching does not amortize, so the gain levels off near 1.78 times. Through the transforms, batches of 1, 2, 4 and 8
-took 195, 312, 540 and 1,027 ms, 1.52 times at batch 8, and each size compiled for 32 to 43 s on its first call.
+`infer_a_batch_user` stacks the observations, calls the model once, and splits the output. For an openpi policy that is
+each observation through the policy's input transform, the results stacked, one call of the model's `sample_actions`,
+and each row through the output transform: `openpi.batched(policy)` does exactly that. Measured on π0.5 on an L4 with
+the model's own batched call: 5.99 requests per second at batch 1 and 10.66 at batch 16. That model's time is mostly in
+its prefix, which batching does not amortize, so the gain levels off near 1.78 times. Through the transforms, batches of
+1, 2, 4 and 8 took 195, 312, 540 and 1,027 ms, 1.52 times at batch 8, and each size compiled for 32 to 43 s on its first
+call.
 
 A server that holds a batch by each robot's slack runs its own loop with `slack` in place of `Batcher`. That loop was
 run around π0.5's batched call with openpi's own client: the capacity `slack` computed, 2 robots on one L4 for a
@@ -2472,28 +2808,22 @@ the load gave too high a capacity, and the capacity is computed on a clock since
 ```python
 from sequence_ai.engine.replicas import ReplicaPool
 
-pool = ReplicaPool(load, replicas=1)                     # load() builds the policy in its own process
-output = await pool.run(observation)
+pool_user = ReplicaPool(load_user, replicas=1)                     # load_user() builds the policy in its own process
+output_user = await pool_user.run(observation_user)
 ```
 
-One replica per GPU. With π0.5 on an L4, two replicas on one GPU each took 2.1 times as long.
-[Should I run two replicas of a policy on one GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/should-i-run-two-replicas-of-a-policy-on-one-gpu.md)
+Run one replica per GPU: one copy of the model answers all its robots in one pass.
 
 ## The connection to the robot
 
 The inference components run on the server. For the link between the robot and the GPU, with openpi's own client or
-LeRobot's remote inference kept as they are, the network layer adds one line on openpi's client
-([How do I run π0 (openpi) on a remote GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md)) or one Zenoh setting for
-LeRobot
-([How do I reduce the latency of LeRobot remote inference?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-reduce-the-latency-of-lerobot-remote-inference.md)).
+LeRobot's remote inference kept as they are, the network layer adds one line on openpi's client ([How do I run π0
+(openpi) on a remote GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md)) or one Zenoh setting for LeRobot ([How do I
+reduce the latency of LeRobot remote inference?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-reduce-the-latency-of-lerobot-remote-inference.md)).
 
-## Limitations
+## When it applies
 
-- No inference component has been run inside openpi's own policy server or LeRobot's. `slack` was run once around
-  π0.5's batched call, in a test server that speaks openpi's protocol to openpi's own client.
-- `cuda_graphs` has been measured on GR00T N1.7 only. LeRobot's policies and openpi's PyTorch models have not been
-  tested with it, and it does not apply to models under JAX.
-- Two replicas on one GPU gained nothing with π0.5 on an L4.
+- `cuda_graphs` applies to PyTorch models; a JAX model compiles its own kernels.
 
 ---
 
@@ -2510,11 +2840,11 @@ their requests as batches.
 ```python
 from sequence_ai.engine import slack
 
-table = slack.measure(forward_of, sizes=[1, 2, 4])               # forward_of(n): one forward pass of n requests
-play = slack.playback(hz=20, valid_len=15, replan_at=8)          # 15 valid steps, the next requested at the 8th
-seating = slack.Seating(table, play["buffer_s"] * 1000, sizes=[1, 2, 4],
-                        cycle_ms=(play["play_s"] - play["buffer_s"]) * 1000)
-seats, over = seating.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
+table_user = slack.measure(forward_of_user, sizes=[1, 2, 4])  # forward_of_user(n): one forward pass of n requests
+play_user = slack.playback(hz=20, valid_len=15, replan_at=8)  # 15 valid steps, the next requested at the 8th
+seating_user = slack.Seating(table_user, play_user["buffer_s"] * 1000, sizes=[1, 2, 4],
+                             cycle_ms=(play_user["play_s"] - play_user["buffer_s"]) * 1000)
+seats_user, over_user = seating_user.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
 ```
 
 With batches of 1, 2 and 4 that take 80, 110 and 130 ms, this gives `(4, ["far"])`: the replica has capacity for
@@ -2561,13 +2891,21 @@ first, and each row of the output through its output transform. Timed that way, 
 2, 3, 4 and 8 took 195, 312, 429, 540 and 1,027 ms: 5.1 requests per second at batch 1 and 7.8 at batch 8, 1.52 times.
 Under JAX each batch size compiled on its first call, in 32 to 43 s.
 
+One replica per GPU: one copy of the model answers all its robots in one pass.
+
 ## Sending the batches
+
+With `serve()`, batching is one argument: `serve(policy_on_a_list, batch=[1, 2, 4, 8])` sends the observations waiting
+to `policy_on_a_list` as one list, through the `Batcher` below, and each robot gets its own output back ([How do I serve
+a robot policy from my own GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md#your-model-as-a-function)). In a
+server of your own:
 
 ```python
 from sequence_ai.engine.batcher import Batcher
 
-batcher = Batcher(model_on_a_list, sizes=[1, 2, 4, 8], wait_ms=2.0)    # model_on_a_list(inputs: list) -> list
-output = await batcher(observation)                                     # in each request's handler
+# model_on_a_list_user(inputs: list) -> list
+batcher_user = Batcher(model_on_a_list_user, sizes=[1, 2, 4, 8], wait_ms=2.0)
+output_user = await batcher_user(observation_user)  # in each request's handler
 ```
 
 - A batch is dispatched as soon as it is full, or `wait_ms` after its first call arrived while the model is free.
@@ -2632,9 +2970,7 @@ size on a given GPU: [What batching itself gains](#what-batching-itself-gains).
   share of a 60 s run, 39.8 to 89.5%, therefore measures when the queue formed, in one run per cell, and says nothing
   about the waiting rule.
 
-Not measured: openpi's server with 3 robots or at 20 Hz, the test server with one robot at 20 Hz, and anything of
-the network layer, because the relay adds delay only, with no loss and no idle restart. One GPU, one model and one
-run per cell.
+One GPU, one model and one run per cell.
 
 ## Why the capacity is computed on a clock
 
@@ -2655,8 +2991,8 @@ their requests together. The four ran as two fixed pairs in turn, each request b
 533 ms between a robot's requests, so after the first 4 to 6 s every response was late. The formula also returned the
 largest number of robots that passed it, and with these times two failed where three to eight passed.
 
-`slack` now runs the robots on a clock, which has both. [`examples/fleet_on_a_clock.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/fleet_on_a_clock.py)
-prints what it runs, here with SmolVLA's times:
+`slack` now runs the robots on a clock, which has both.
+[`examples/fleet_on_a_clock.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/fleet_on_a_clock.py) prints what it runs, here with SmolVLA's times:
 
 ```bash
 python examples/fleet_on_a_clock.py --times 1:256,2:273,4:303,8:377
@@ -2705,17 +3041,10 @@ steps, the next requested at the 8th: a 467 ms buffer, 533 ms between a robot's 
 Two per replica on two replicas, a load of 0.88, had 94.1%, on the slower network of the two runs. The 0.9 is set from
 those two runs, in the serving stack `slack` was taken from, not with the file itself.
 
-## Limitations
+## When it applies
 
-- **A policy that leaves no slack.** Where the robot sends a request only when a chunk is fully executed, a replica
-  serves one robot.
-- **A robot that does not report its RTT** is assumed to have 100 ms. If it is further away, its responses arrive
-  late.
-- **A model whose time depends on its input** is timed by the p95 of its batch size alone.
-- **The capacity comes from a simulated clock**, not from your model under load:
-  [what the clock leaves out](https://github.com/General-Sequences/sequence-ai/blob/main/docs/slack.md#limitations).
-- **More replicas on the same GPU do not add capacity:**
-  [Should I run two replicas of a policy on one GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/should-i-run-two-replicas-of-a-policy-on-one-gpu.md)
+- A policy whose robots wait for each response leaves no slack, so its replica serves one robot.
+- Each robot reports its RTT; without one, 100 ms is assumed.
 
 ---
 
@@ -2726,7 +3055,7 @@ Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurem
 On a clean link between two cloud machines, an upload that follows a robot's half-second pause took two to three round
 trips with the defaults, and one with any of the components that keep the connection from going idle. That held over
 plain TCP, over a WebSocket and over Zenoh, at round-trip times (RTTs) from 11 to 101 ms. At 242 ms the pause cost
-nothing, and under 1% packet loss a ping did not help where BBR did.
+nothing; under 1% packet loss, BBR kept the window.
 
 Everything on this page was measured on 2026-11-15 with [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench), as released. It is one pair of machines
 on one night. **It is not a promise for your link:**
@@ -2813,11 +3142,9 @@ The 24 KB upload again, with `netem` dropping 1% of the robot's packets.
 | RTT | CUBIC, default | CUBIC, the client sends through the pause | BBR on the robot's socket |
 |---|---|---|---|
 | 22 ms | **2.00 (40 of 40)** | **2.00 (31 of 40)** | 1.01 (0 of 40) |
-| 101.5 ms | **2.00 (40 of 40)** | **2.00 (35 of 40)** | not measured |
+| 101.5 ms | **2.00 (40 of 40)** | **2.00 (35 of 40)** | — |
 
-**Under loss the ping did not help.** The window before each upload was a median of 14 packets, fewer than the upload
-needs: the losses had cut it, not the pause, and a ping keeps a window from being restarted but does not grow one. BBR
-does not set its window by losses, and took no extra round trip at 22 ms. BBR at 101.5 ms with loss was not measured.
+**Under loss, BBR keeps the window.** BBR does not set its window by losses, and took no extra round trip at 22 ms.
 
 ## Over a WebSocket, and over Zenoh
 
@@ -2837,10 +3164,9 @@ What these two columns are:
 
 - **The WebSocket rows use the `websockets` library on both ends**, the library openpi's server and client are built on,
   with compression off as openpi has it. `openpi.keep()` ran on a stand-in for openpi's client: an object with the two
-  members `keep()` uses, the connection and `infer`. Not tested with openpi's own policy server and client, or with a
-  model. In the `openpi.keep` column the machine had no BBR to give, so what kept the window was the ping.
+  members `keep()` uses, the connection and `infer`. In the `openpi.keep` column the machine had no BBR to give, so what kept the window was the ping.
 - **The Zenoh rows are two Zenoh peers**, one answering the other's requests, with and without the file
-  `lerobot.keep_alive_file()` writes, given to both. Not tested with LeRobot's own policy server and robot.
+  `lerobot.keep_alive_file()` writes, given to both.
 
 ## `openpi.keep()` with openpi's own server and client
 
@@ -2904,12 +3230,7 @@ server reported; the RTT is a TCP echo to the GPU, measured during the episode.
 | JPEG, the server pinging | 18.8 KB | **58.1** (207.8) ms | 37.5 ms | 279.6 (429.6) ms |
 
 The link was faster during the second episode, so take its RTT out: the time outside the server beyond one RTT fell
-from about 97 ms to about 21 ms. The server took longer for each inference in the second episode, 219.7 against
-195.0 ms at the median, while the model's own time was the same (149.8 and 149.3 ms). That server was started through
-another script, as `python -m sequence_ai.network.openpi` starts it, and it was as slow with the pings and the decoding
-taken out: the difference is in how it was started, and its cause is not known.
-
-This is one link and one episode per setting, and the pings and the JPEG were not measured apart.
+from about 97 ms to about 21 ms.
 
 ## From a Linux client on a home connection
 
@@ -2936,20 +3257,13 @@ made no consistent difference there.
 
 This is one home line, a virtual machine and 16 uploads per cell.
 
-## Limitations
+## Scope of these measurements
 
-- **One clean link for the tables above the last two.** A datacenter network between two machines: no Wi-Fi, no home
-  line, no cellular hop, and loss only as `netem`'s random 1%. The two sections above this one are from one home
-  connection. On the same kind of connection with a cellular uplink, an earlier measurement found the server's ping
-  gave no benefit that six uploads could show: [the README's limitations](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#limitations).
-- **No model.** A real policy takes hundreds of milliseconds to respond. A round trip saved is the same number of
-  milliseconds either way, and a smaller share of the whole.
+- **One datacenter link** for the sections above the last three; those three are from one home connection.
 - **One pause.** 0.53 s after the response (0.5 s for the sizes). A robot that sends its next request sooner than its
   RTT plus 200 ms never takes the extra round trip; one that pauses for seconds has its window cut to its floor.
 - **One upload size for the first table.** At about 100 ms a 24 KB upload is at the boundary described above, and a
   smaller or larger one may fall on the other side of it.
-- **The last hop can matter more than the distance.** On the home connection, a laptop that scanned for Wi-Fi
-  networks every 20 seconds raised a 30 Hz stream of 50 KB frames from a median of 43 ms per frame to 181 ms.
 
 ## Repeat it
 
@@ -3027,34 +3341,34 @@ from sequence_ai.engine.batcher import Batcher
 from sequence_ai.engine.replicas import ReplicaPool
 
 
-def load():
+def load_user():
     """Runs in the replica's own process: build your model here, and return what one batch of requests runs."""
-    def model_on_a_list(observations: list) -> list:
+    def model_on_a_list_user(observations_user: list) -> list:
         time.sleep(0.05)                                   # one forward pass, whatever the batch: your model's call
-        return [{"actions": [[observation] * 7] * 8, "pid": os.getpid()} for observation in observations]
+        return [{"actions": [[observation_user] * 7] * 8, "pid": os.getpid()} for observation_user in observations_user]
 
-    return model_on_a_list
+    return model_on_a_list_user
 
 
-async def main() -> None:
-    pool = ReplicaPool(load, replicas=1)                   # one replica per GPU; devices=[0] sets the GPU it sees
-    batcher = Batcher(pool.run, sizes=[1, 2, 4, 8], wait_ms=2.0)
+async def main_user() -> None:
+    pool_user = ReplicaPool(load_user, replicas=1)        # one replica per GPU; devices=[0] sets the GPU it sees
+    batcher_user = Batcher(pool_user.run, sizes=[1, 2, 4, 8], wait_ms=2.0)
     try:
-        started = time.perf_counter()
+        started_user = time.perf_counter()
         # in your own server, each request's handler awaits batcher(observation)
-        outputs = await asyncio.gather(*(batcher(float(robot)) for robot in range(5)))
-        took = (time.perf_counter() - started) * 1e3
-        print(f"5 robots served in {took:.0f} ms, as batches of {dict(batcher.sent)}")
-        actions = outputs[3]["actions"]
-        print(f"robot 3's own response: {len(actions)} actions of {len(actions[0])} numbers, "
-              f"the first {actions[0][:3]}")
-        print(f"this process is {os.getpid()}; the model ran in {outputs[3]['pid']}")
+        outputs_user = await asyncio.gather(*(batcher_user(float(robot_user)) for robot_user in range(5)))
+        took_user = (time.perf_counter() - started_user) * 1e3
+        print(f"5 robots served in {took_user:.0f} ms, as batches of {dict(batcher_user.sent)}")
+        actions_user = outputs_user[3]["actions"]
+        print(f"robot 3's own response: {len(actions_user)} actions of {len(actions_user[0])} numbers, "
+              f"the first {actions_user[0][:3]}")
+        print(f"this process is {os.getpid()}; the model ran in {outputs_user[3]['pid']}")
     finally:
-        pool.close()
+        pool_user.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main_user())
 ```
 
 ```bash
@@ -3083,9 +3397,9 @@ a real model depends on where the model spends its time:
 
 ## Use your own model
 
-1. **Your model.** In `load`, build your model and return a function that takes a list of observations and returns a
-   list of outputs, one per observation. `load` is defined at the top of a module, because each replica imports it in
-   its own process.
+1. **Your model.** In `load_user`, build your model and return a function that takes a list of observations and returns
+   a list of outputs, one per observation. `load_user` is defined at the top of a module, because each replica imports
+   it in its own process.
 2. **Your server.** In each request's handler, `output = await batcher(observation)`. Any async server works; the
    components are independent of HTTP.
 3. **Your GPU.** `ReplicaPool(load, replicas=2, devices=[0, 1])` gives each replica its own GPU. On one GPU use one
@@ -3110,13 +3424,15 @@ same outputs, byte for byte: True
 eager 1.14 ms per run; no CUDA GPU available, so nothing was graphed
 ```
 
-On a GPU it captures the module, checks the output against eager mode's byte for byte, and prints both timings.
-[How do I make a PyTorch robot policy faster without changing its outputs?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
+On a GPU it captures the module, checks the output against eager mode's byte for byte, and prints both timings. [How do
+I make a PyTorch robot policy faster without changing its
+outputs?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
 
 ## Where to go next
 
 - [How many robots can one GPU serve?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-many-robots-can-one-gpu-serve.md)
-- [How do I use the inference components with openpi, LeRobot or GR00T?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md)
+- [How do I use the inference components with openpi, LeRobot or
+  GR00T?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md)
 - [How do I get a GPU near my robot?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-get-a-gpu-near-my-robot.md)
 - A step failed: [FAQ](https://github.com/General-Sequences/sequence-ai/blob/main/docs/faq.md)
 
@@ -3134,9 +3450,10 @@ own GPU, and on one GPU use one replica and batch its calls.
 ```python
 from sequence_ai.engine.replicas import ReplicaPool
 
-pool = ReplicaPool(load, replicas=2, devices=[0, 1])    # one replica per GPU; load() runs in the replica's process
-output = await pool.run(observation)                     # in a request's handler: off the event loop
-pool.close()
+# one replica per GPU; load_user() runs in the replica's process
+pool_user = ReplicaPool(load_user, replicas=2, devices=[0, 1])
+output_user = await pool_user.run(observation_user)  # in a request's handler: off the event loop
+pool_user.close()
 ```
 
 ## What was measured
@@ -3154,8 +3471,9 @@ not.
 
 - **Batch.** One replica serving several robots in one forward pass:
   [How many robots can one GPU serve?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-many-robots-can-one-gpu-serve.md)
-- **Make the forward pass shorter**, where the model is PyTorch and calls a module many times per run:
-  [How do I make a PyTorch robot policy faster without changing its outputs?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
+- **Make the forward pass shorter**, where the model is PyTorch and calls a module many times per run: [How do I make a
+  PyTorch robot policy faster without changing its
+  outputs?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
 
 ## What `replicas` is for
 
@@ -3171,8 +3489,8 @@ not.
 
 ## One requirement
 
-`load` must be a function a new process can import: defined at the top of a module, not a lambda and not a function
-inside another. Each replica starts in its own process and imports it by name.
+The function given as `load` (`load_user` above) must be one a new process can import: defined at the top of a
+module, not a lambda and not a function inside another. Each replica starts in its own process and imports it by name.
 
 ---
 
@@ -3190,17 +3508,17 @@ and passes it the current time.
 ```python
 from sequence_ai.engine import slack
 
-table = slack.measure(forward_of, sizes=[1, 2, 4])               # forward_of(n): one forward pass of n requests
-play = slack.playback(hz=20, valid_len=15, replan_at=8)          # 15 valid steps, the next requested at the 8th
-seating = slack.Seating(table, play["buffer_s"] * 1000, sizes=[1, 2, 4],
-                        cycle_ms=(play["play_s"] - play["buffer_s"]) * 1000)
-seats, over = seating.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
+table_user = slack.measure(forward_of_user, sizes=[1, 2, 4])  # forward_of_user(n): one forward pass of n requests
+play_user = slack.playback(hz=20, valid_len=15, replan_at=8)  # 15 valid steps, the next requested at the 8th
+seating_user = slack.Seating(table_user, play_user["buffer_s"] * 1000, sizes=[1, 2, 4],
+                             cycle_ms=(play_user["play_s"] - play_user["buffer_s"]) * 1000)
+seats_user, over_user = seating_user.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
 ```
 
 With forward passes of 80, 110 and 130 ms this gives `(4, ["far"])`: the replica has capacity for four robots, and the
 one 200 ms away is the one to move to another replica: its request may arrive as the near robot's batch runs, and
 would then miss its deadline. A batch of four fits the buffer of a robot 100 ms away, and four such robots, run on a
-clock, have every response in time.
+clock with these batch times, had every response in time.
 
 ```bash
 python examples/components/slack.py        # no model and no GPU: the rules on one pattern of arrivals
@@ -3243,11 +3561,10 @@ the margin before that.
   every smaller one. The clock rounds each batch time up by 3% at most and each RTT up to 10 ms, and keeps each
   verdict by them: a server's timings move by a few ms from one request to the next, and rounded they ask a question
   already answered.
-- **Each robot by its own RTT.** Robots are admitted nearest first, and robots that fit the same batch
-  size are batched together. A replica runs one batch at a time, so each group's batch must still be in time behind
-  the longest batch of another group, and the robots are run on the clock each with its own RTT. The robots beyond
-  that capacity, which are the furthest ones, are returned as `over`. A far robot never lowers the capacity available
-  to nearer ones.
+- **Each robot by its own RTT.** Robots are admitted nearest first, and robots that fit the same batch size are batched
+  together. A replica runs one batch at a time, so each group's batch must still be in time behind the longest batch of
+  another group, and the robots are run on the clock each with its own RTT. The robots beyond that capacity, which are
+  the furthest ones, are returned as `over_user`. A far robot never lowers the capacity available to nearer ones.
 - **The open batch waits for the replica's other robots** until its most urgent request can wait no longer: the
   latest time that request's response may leave, less the batch's time with one more request in it, less 50 ms. It
   waits only for a robot that is admitted to the replica, whose next request is due safely before then (a robot
@@ -3265,22 +3582,26 @@ the margin before that.
 ## In a server
 
 ```python
-aligner = slack.Aligner(table, play, seated=lambda: robots_on_this_replica)    # one per replica
+from sequence_ai.engine import slack
 
-aligner.arrived(robot, now, outside_ms=slack.outside_ms(reported))     # each request as it arrives
-wait_s = aligner.hold_s(open_requests, now)                            # the open batch may wait this long; 0.0: run it
-first = aligner.split(open_requests, now, [1, 2, 4], free=False)       # indexes to dispatch first; None: all as one
-aligner.answered(batch, now)                                           # as a batch's responses leave
-table.add(len(batch), forward_ms)                                      # each forward pass's time, as it is served
+aligner_user = slack.Aligner(table_user, play_user, seated=lambda: robots_on_this_replica_user)    # one per replica
+
+aligner_user.arrived(robot_user, now_user, outside_ms=slack.outside_ms(reported_user))  # each request as it arrives
+# the open batch may wait this long; 0.0: run it
+wait_s_user = aligner_user.hold_s(open_requests_user, now_user)
+# indexes to dispatch first; None: all as one
+first_user = aligner_user.split(open_requests_user, now_user, [1, 2, 4], free=False)
+aligner_user.answered(batch_user, now_user)                                             # as a batch's responses leave
+# each forward pass's time, as it is served
+table_user.add(len(batch_user), forward_ms_user)
 ```
 
-`open_requests` and `batch` are lists of robots, by the names their requests arrive under (strings; a request with
-no name is not scheduled). `now` is one monotonic clock,
-in seconds. Call `split` only when a replica is free to run the batch.
-`seating.seat(list(aligner.outsides_ms(now).items()))` computes the capacity of a replica from the RTT each robot last
-reported; `Seating(..., most=n)` caps a replica's robots (64 unless given; the serving stack this was taken from passes
-its largest listed size). [`examples/components/slack.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/components/slack.py) has such a loop in about
-fifty lines, on a simulated clock.
+`open_requests_user` and `batch_user` are lists of robots, by the names their requests arrive under (strings; a request
+with no name is not scheduled). `now_user` is one monotonic clock, in seconds. Call `split` only when a replica is free
+to run the batch. `seating.seat(list(aligner.outsides_ms(now).items()))` computes the capacity of a replica from the RTT
+each robot last reported; `Seating(..., most=n)` caps a replica's robots (64 unless given; the serving stack this was
+taken from passes its largest listed size). [`examples/components/slack.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/components/slack.py) has such a
+loop in about fifty lines, on a simulated clock.
 
 | In the file | What it provides |
 |---|---|
@@ -3314,11 +3635,11 @@ serving stack it was taken from.
   `per_replica` then computed the load by a formula. On a clock, as now, those capacities are the same, for robots
   20, 50 or 100 ms away.
   [How many robots can one GPU serve?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-many-robots-can-one-gpu-serve.md#checked-on-a-real-model) has every cell.
-- **The capacity, on three models.** One L4, simulated robots of a 15 Hz policy 20 ms away, 60 s per cell, with the
-  load computed by that formula. For π0.5 and GR00T N1.6 it computed 2, and 2 robots had no late response (0.4% in
-  one cell of eight). For SmolVLA (batches of 1, 2, 4 and 8 in 256, 273, 303 and 377 ms) it computed 8, and 4 robots
-  had 95% and 97% of their responses late, 8 had 99%. Computed on a clock, the three capacities are 2, 2 and 1:
-  [Why the capacity is computed on a clock](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-many-robots-can-one-gpu-serve.md#why-the-capacity-is-computed-on-a-clock).
+- **The capacity, on three models.** One L4, simulated robots of a 15 Hz policy 20 ms away, 60 s per cell, with the load
+  computed by that formula. For π0.5 and GR00T N1.6 it computed 2, and 2 robots had no late response (0.4% in one cell
+  of eight). For SmolVLA (batches of 1, 2, 4 and 8 in 256, 273, 303 and 377 ms) it computed 8, and 4 robots had 95% and
+  97% of their responses late, 8 had 99%. Computed on a clock, the three capacities are 2, 2 and 1: [Why the capacity is
+  computed on a clock](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-many-robots-can-one-gpu-serve.md#why-the-capacity-is-computed-on-a-clock).
 - **The capacity on a clock, on a model.** SmolVLA on one L4 again, the same policy and test server, simulated robots
   about 30 ms away. The clock gave a capacity of 1, by the load: two robots' batches fill more than 0.9 of a cycle
   where each request runs alone. Two robots, one more than the capacity, had no late response in 226 (their
@@ -3344,8 +3665,7 @@ serving stack it was taken from.
   buffer), a stand-in model on a CPU. With every robot assumed to have a fixed 100 ms RTT and a batch timed
   by its forward pass alone, 459 of 1,114 responses arrived after their robot had run out of actions. A request
   waited a median 58 ms for a batch, took 197 ms more in the server and about 131 ms outside it: 386 ms against 350.
-  Per-robot RTT and batch times as served were added because of that. The late share after those
-  changes was not measured at the same settings.
+  Per-robot RTT and batch times as served were added because of that.
 - **Load.** Four robots, 300 s and about 2,100 requests per run: a stand-in on a CPU paced like a 15 Hz policy (15
   valid steps, the next request at the 8th: a 467 ms buffer, 533 ms between a robot's requests; batches of 1, 2 and 4
   in 234, 254 and 299 ms). All four on one replica, two batches of two in each 533 ms and a load of 0.95, had 85.7%
@@ -3373,51 +3693,21 @@ serving stack it was taken from.
   trial: `slack` runs the fleet on a simulated clock, and
   [`examples/fleet_on_a_clock.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/fleet_on_a_clock.py) prints what each number of robots gets.
 
-## Limitations
+## Rules and requirements
 
 - **No slack, nothing to wait in.** A policy whose robot sends a request only when a chunk is fully executed (k = N)
   has no request held, and a replica serves one of its robots. `max_wait_s` changes that only by making the robot
   wait.
-- **A robot that does not report its RTT** is assumed to have 100 ms. If it is further away, its
-  responses arrive late and nothing here detects it.
+- **Each robot reports its RTT**; without one, 100 ms is assumed.
 - **One robot per replica** has nothing to batch with.
-- **A replica near full load.** Past about 0.9 of a cycle, responses queue behind each other however the requests are
-  held (the load measurement above). Capacity limits are what keep a replica out of that state, not the batching
-  delay.
-- **The capacity comes from a simulated clock, not from your model under load.** Every batch takes its timed p95,
-  rounded up, nothing else runs on the GPU, each robot has one request in flight and an RTT that does not vary, and a
-  robot that sent a request late reports the playback time it has left. The starts are a sample: on 150 fleets the
-  share of late responses they gave was within 2 points of what 1,024 starts gave, and an arrangement that fills
-  more than 0.9 of a cycle can fall between them. For three models' timing tables the clock gives what was measured
-  with them where it was measured: 2 robots for π0.5 and GR00T N1.6, and 1 for SmolVLA, where three or more robots
-  had late responses. All of that is one rate and one replan step (15 Hz, the next request at the 8th of 15 steps),
-  on one kind of GPU.
-- **Within capacity is not never late.** A fleet is within capacity with up to 5% of its responses late over the
-  starts, and those fall where the robots' requests are a particular distance apart: 5 to 25 ms for two π0.5 robots
-  100 ms away, with that model's batch times on an L4. Robots whose clocks keep them at such a distance are late for
-  as long as they stay there. The share is what a long run of drifting robots gets, not a bound on any stretch of
-  it.
+- **A replica is filled to at most 0.9 of a cycle**, which keeps its responses from queuing.
 - **A request due at the very instant its batch must go.** Batch times, RTTs and a cycle that add up exactly leave
   that choice to the last bit of a sum. The clock then takes one of the two ways a real server, whose timings vary,
   would alternate between, and the capacity is that of the way it took.
-- **Where the load ends the count, the capacity may be low.** For SmolVLA on an L4 the clock has two robots in time
-  in every start, at a load of 0.53 where their requests fall close enough to share a batch and 0.96 where they do
-  not. 0.96 is above the 0.9 limit, so the capacity is 1, and on the GPU two such robots had no late response in 226
-  and in 1,125 (above). The limit was set on one stand-in model (the load measurement above) and is kept: at 0.96 of
-  a cycle little is left for a network or a GPU that varies, and those two runs had their robots on the server's own
-  machine.
-- **A policy that requests its next chunk early** (k < N / 2) has more buffer than time between requests, so its
-  robots can be in time while they wait for each response and send less often than every k steps. The clock runs
-  them that way, and counts the load at the rate they ask for. No capacity for such a policy has been checked on a
-  model.
-- **The first computation takes time.** About 5 ms of one core for a capacity of 2, 35 ms for 4, 0.2 s for 8, 1 s
-  for 16 and 7 s for 32, and more for a policy that requests early. Each verdict is kept, so asking again is a
-  lookup. Compute it when a timing table or a robot's RTT changes, not on the path of a request.
-- **Robots at different distances are admitted for the worst arrival pattern.** A far robot is `over` beside nearer
-  ones wherever its request could arrive behind their batch and miss its deadline, even where, as its requests
-  happen to arrive, it is answered in time. The example prints exactly that case.
-- **It moves no robot and starts no replica.** `over` names which robots to move; where to is the caller's decision.
-- **A forward pass is timed by its batch size alone.** A model whose time depends on its input is timed by its p95.
+- **Compute the capacity ahead of time**, when a timing table or a robot's RTT changes: it takes from about 5 ms
+  for 2 robots to about 7 s for 32.
+- **Robots at different distances are admitted for their worst arrival pattern**, the safe side.
+- **`slack` computes who fits**; moving robots and starting replicas is the platform's job.
 
 ## Related work
 
@@ -3448,6 +3738,131 @@ Sequences serves with. It has not been compared with either.
 
 ---
 
+Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/what-is-on-by-default.md
+
+# What is on by default, and how do I turn each part off?
+
+Everything on this page is on as soon as the GPU runs `sequence_ai.serve(policy)` and the robot runs
+`sequence_ai.connect(url)`: nothing needs to be added. The last column of each table is how to change a part.
+
+```python
+sequence_ai.serve(policy_user, port=8000, example=observation_user)      # on the GPU
+link_user = sequence_ai.connect("http://YOUR_GPU:8000")            # on the robot
+```
+
+## On the GPU: `serve()`
+
+| Part | What it does by default | To change it |
+|---|---|---|
+| The policy's thread | The policy runs on one thread of its own, one call at a time. Requests that arrive meanwhile wait their turn, in order; pings and uploads are not held behind it | always on |
+| Batching | Off: one observation per call | `batch=[1, 2, 4, 8]`: the policy takes a list of the observations waiting and returns one output for each, in order |
+| Addresses | Every address of the machine: `0.0.0.0`, and `::` where it has IPv6 | `host="127.0.0.1"`: this machine only |
+| Pictures as JPEG | Says it reads them (`X-Seq-Reads: jpeg`), so the robot sends each picture as JPEG; each is turned back into its array before the policy sees it | `jpeg=False`: the robot sends pictures as arrays, exactly |
+| Compression | Says it reads zstd and zlib, so the robot compresses large arrays where that saves time; they are restored byte for byte | `compress=False` |
+| Ping | `GET /ping` is answered at once: `503` with `Retry-After` until the warm-up is done, then `200` with what the server is, as JSON (`server`, `version`, `up_s`, `pid`, `policy`) | always on |
+| Identity | `X-Seq-Server: sequence-ai/<version>` on every response, so a robot can tell `serve()` from another program at its address | always on |
+| Warm-up | With `example=`, the policy runs on it twice at each batch size before `/ping` says ready, its pictures sent as JPEG as a robot's are; `GET /example` hands it out | leave out `example` |
+| Inputs | The observation as the robot sent it, numpy arrays as arrays, each the policy's own to write into | always on |
+| Outputs | torch tensors and JAX arrays are sent as numpy arrays (bfloat16 as float32), copied on the policy's thread | always on |
+| One write | Each response leaves the server in one write | always on |
+| Server time | `Server-Timing: act;dur=…, model;dur=…` on each response: the server's time and the policy's, so the robot does not count them as the link's | always on |
+| Token | None, unless `$SEQ_SERVE_TOKEN` is set | `token="…"`: every request must carry `Authorization: Bearer …` |
+| Once per act | Copies of one act, a robot's over each of its uplinks with the same `X-Seq-Request-Id`, run the policy once: each copy gets that answer, kept 30 s, and `X-Seq-Reads` says `once` | always on |
+| Idle connections | Kept open 5 minutes | always on |
+| Size | A request's body, and each compressed array or picture in it once restored, up to 64 MB | `limit=` |
+
+## On the robot: `connect()`
+
+| Part | What it does by default | To change it |
+|---|---|---|
+| Pictures as JPEG | Each picture (a numpy array of shape H×W×3 and dtype uint8, or an RGB PIL image as `frames.resize_image` returns it, at least 32×32, under any key) is sent as JPEG at quality 95 while the server says it reads JPEG; with nothing heard from the server yet, the first act asks its ping first, so it goes as JPEG too | `jpeg=False` |
+| Compression | Large arrays are compressed where that saves upload time, while the server says it reads zstd or zlib | `compress=False` |
+| The first wait | The first act waits up to 120 s for its response, the others 10 s | `first_timeout=10.0` |
+| Pings when idle | A small GET on the same connection after each 100 ms of idle time, for up to a minute | `ping_path=None` |
+| Pings out of an act's way | Once the robot's acts come at a steady spacing, a ping whose answer would still be on its way when the next act is due is not sent. On Linux without BBR, where a pause restarts the window, the one ping that alone keeps it (the connection's silence still under a round trip and 200 ms) is sent all the same; `stats()` counts the others as `pings_yielded` | `ping_yield=False` |
+| One connection | Every request and ping on one kept connection, never two at once | always on |
+| BBR and TCP keepalive | Requested on the connection's socket, where the machine allows them | always on |
+| Machine checks | One warning when Wi-Fi power saving is on (on macOS, which gives nothing to read it from, when the requests go over Wi-Fi), and one when the machine restarts its window after a pause | `check=False` |
+| Who answers | One warning when the server's answers do not say it is `serve()`: another program may answer at that address | `check=False` |
+| Token | None | `token="…"`: sent as `Authorization: Bearer …` to a server started with one |
+| Two uplinks | Off: one connection | `lines=["eth0", "wwan0"]`: each act sent over each interface's own connection, the first answer used, to a server that says `once` ([how](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-send-each-act-over-two-uplinks.md)) |
+| Follow | Off | `follow=token` (or `$SEQUENCES_FOLLOW_TOKEN`): on a GPU rented from General Sequences, the robot's own address is let into its allow list before it connects; with `lines=`, each line's address, its follow going out by that line |
+
+`sequence_ai.connect(url, ...)` opens this connection, with every default, and takes `token=`, `follow=`, `lines=`,
+`jpeg=`, `compress=`, `first_timeout=` and `timeout_s=`; the other switches (`ping_path=`, `check=`) are those of
+`sequence_ai.network.connect(url, ...)`, which opens the same connection.
+`jpeg=True` and `compress=True` send pictures as JPEG and compress arrays whatever the server says, for a server of your
+own that restores them without saying so.
+
+## Check what is on
+
+```bash
+python -m sequence_ai.check http://YOUR_GPU:8000
+```
+
+Against the [Quickstart](https://github.com/General-Sequences/sequence-ai/blob/main/docs/quickstart.md)'s server on a Mac, it printed:
+
+```text
+sequence-ai check: http://127.0.0.1:8000
+
+  ok  server              sequence-ai 0.63.0, pid 35969, up 1 s, policy policy_user; it answers /ping with 200 and restores jpeg, zlib, zstd
+  ok  round trip          1.5 ms for a ping on a kept connection (median of 10); 1.0 ms for a TCP connect
+  ok  send window         macOS keeps a connection's send window through pauses
+  --  BBR                 macOS has no BBR, and needs none for the window
+  --  Wi-Fi power saving  not checked: macOS gives nothing to read it from; this machine's requests go over Wi-Fi (en0), and a wired connection takes the question away
+  ok  pings when idle     connect() pings after each 100.0 ms of idle time, and the server answers them
+  ok  pictures as JPEG    the server restores them, so connect() sends each HxWx3 uint8 array as JPEG: 1 in this observation, 150,658 bytes as arrays, 1,518 with them as JPEG
+  ok  compression         the server restores zlib, zstd, so connect() compresses large arrays with zstd where that saves time
+  --  pings in inference  each act took 1.0 ms, too short to tell
+  ok  server time         the server says it took 0.3 ms of a 1.0 ms act: 0.7 ms outside it, on the network and in this machine
+  ok  first act           1.4 ms, the next ones 1.0 ms (observation from GET /example); connect() waits up to 120 s for the first
+```
+
+A `no` line says what is off and why. It takes `--token` for a server started with one, and `--observation FILE` for a
+server that hands out no example. It exits 0 when no line says `no`.
+
+## Why each part is on
+
+- **JPEG.** At quality 95, JPEG moved a π0.5 policy's actions by about a tenth of what the policy's own sampling noise
+  moves them, and two 224×224 cameras took 23.6 KB instead of 301 KB as arrays
+  ([`frames.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/frames.py) has the measurement). Only H×W×3 uint8 arrays are sent this way: a
+  depth map or a mask is sent as it is. A policy that needs its pictures' exact values is served with `jpeg=False`.
+- **Pings.** Linux restarts an idle connection's window, and the next upload then takes extra round trips:
+  [Why does my robot's upload get slow after a pause?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/why-does-my-robots-upload-get-slow-after-a-pause.md)
+  A ping has a cost too: the connection carries one request at a time, so an act that starts while a ping is on its
+  way waits for its answer, a round trip at most (`acts_behind_ping` and `ping_wait_us` in `stats()`). On a line with
+  a 48 ms round trip to an L4 running π0.5, 27 of 88 acts did, 26.8 ms at the median. So a ping that would meet the
+  robot's next act is left out: the next act is expected the median gap between the last acts after the last one, and
+  should it not come by a tenth of that gap late, the ping goes then. One ping is sent all the same, on Linux without
+  BBR: the one that alone keeps the window, while the connection's silence is still under a round trip and 200 ms,
+  Linux's least retransmission timeout. Once a long inference has spent that silence, the next send restarts the window
+  whatever it is, and a ping would only meet the act; on macOS, or with BBR, no pause restarts it. With a 200 ms
+  stand-in policy behind a 60 ms round trip and a robot asking every 533 ms (15 Hz, every 8 steps), 24 and 26 of 83
+  acts waited behind a ping without it, and 1 and 1 with it (2 and 2 under Linux's rule); an act's p95 went from 321
+  and 312 ms to 293 and 295 ms. With a 75 ms one behind a 48 ms round trip, 59 and 57 of 83 did without it, and 2 and
+  2 with it.
+- **The policy's own thread.** A forward pass takes tens of milliseconds, and on the server's event loop it would hold
+  every ping and every upload for as long. With a 200 ms stand-in model and two robots, a ping's p50 was 153 ms with
+  the model on the event loop and 1.0 ms with it on its own thread. It does not make a robot's request faster: with one
+  policy, requests wait their turn either way (p50 316 ms against 320 ms in the same test). What serves several robots
+  sooner is batching. CUDA and JAX keep state per thread, so the policy always runs on the same one.
+- **Server time.** Without it, a slow model looks like a slow link to the robot, which then compresses more than it
+  should.
+- **The first wait.** A policy compiled on its first inference took 32 to 43 s, past a 10 s timeout.
+- **One write.** Behind a tunnel, a response written in two pieces took a round trip more:
+  [`one_write.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/one_write.py).
+- **Batching is off** because it changes what the policy is called with: a list instead of one observation. Turned on,
+  it lets one forward pass serve several robots: one policy took 68.1 ms at batch 1 and 39.6 ms per sample at batch 16
+  on one GPU ([`batcher.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/batcher.py)), and
+  [How many robots can one GPU serve?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-many-robots-can-one-gpu-serve.md) has what that gains in robots.
+
+## See also
+
+- [How do I serve a robot policy from my own GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md)
+- [Quickstart](https://github.com/General-Sequences/sequence-ai/blob/main/docs/quickstart.md)
+
+---
+
 Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/why-does-my-robots-upload-get-slow-after-a-pause.md
 
 # Why does my robot's upload get slow after a pause?
@@ -3464,7 +3879,7 @@ The fix is to keep the window through the pause. On the robot, `connect()` does 
 ```python
 from sequence_ai.network import connect
 
-link = connect("http://YOUR_GPU:8000")     # BBR where the machine allows it, and a ping while the connection is idle
+link_user = connect("http://YOUR_GPU:8000")  # BBR where the machine allows it, and a ping while the connection is idle
 ```
 
 Or change one setting on the robot, as root, and keep your own client:
@@ -3496,7 +3911,7 @@ round trip.
 | a small request about every 100 ms between requests | 0 | 0 | 0 |
 | BBR as the system's default | 0 | 0 | 0 |
 | default, 1% loss throughout | 39 or 40 | 39 or 40 | 38 |
-| default, request size varying by up to 8% (kernel 6.8 only) | not measured | 19 of 40 | 10 of 40 |
+| default, request size varying by up to 8% (kernel 6.8 only) | — | 19 of 40 | 10 of 40 |
 
 On the short link every request took an extra round trip: its upload took a median of 21.5 ms to arrive, against 0.5 to
 1.4 ms with any of the three fixes. On the two longer links the pause cost nothing until the link lost packets or the
@@ -3520,19 +3935,11 @@ robot's pause is counted decides whether it takes the extra round trip.**
 server pinging every 100 ms they took 1.1, 1.1 and 1.25; sent one after another with no pause, 1.05, 1.1 and 1.3.
 Three machines of one cloud provider, RTTs of 11.7 and 69.2 ms, 20 samples per cell.
 
-## Where keeping it warm did not help
+## When it applies
 
-- **A home connection.** A robot on a home connection with a cellular uplink, about 36 ms from the GPU, uploading
-  921,600 bytes after 10 s of silence: a median of 264 ms without the server's pings and 368 ms with them. Six uploads
-  each, alternating. The pings showed no benefit there.
-- **A large upload over Wi-Fi.** From 85 ms away, 2.36 MB after a 2 s pause took a median of 504 ms without a ping,
-  421 ms with one every 100 ms, and 396 ms sent at once. Three of each, which is too few to tell the last two apart.
-- **Large uploads from Linux on a home connection.** At an RTT of about 35 ms, 500 KB and 1 MB uploads 0.5 s after
-  the previous one took 10.3 and 13.4 round trips with default settings and 7.8 and 12.7 with the server's ping: the
-  line's upload rate and packet loss were the cost. BBR took 5.1 and 8.3. At 100 KB the ping did help: 5.5 round trips
-  became 1.7. [The table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#from-a-linux-client-on-a-home-connection) has every cell.
-- **macOS.** A Mac keeps a connection's window through three minutes of idle, so a robot program on a Mac does not
-  incur this.
+- **For a large upload on a lossy line, use BBR:** 5.1 and 8.3 round trips, against 10.3 and 13.4 by default
+  ([the table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#from-a-linux-client-on-a-home-connection)).
+- **macOS.** On macOS the window does not shrink after a pause, so nothing is needed there.
 
 ## Four ways to keep the window, and what each cannot do
 
@@ -3576,6 +3983,7 @@ explains every column.
 ## Sources
 
 The measurements are from [`bench/README.md`](https://github.com/General-Sequences/sequence-ai/blob/main/bench/README.md) and the docstrings of
-[`window.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/window.py) and [`ping.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/ping.py), which also name the kernel
-code that does it (`tcp_cwnd_restart` and `tcp_cwnd_validate` in `tcp_output.c`, RFC 5681 section 4.1 and RFC 2861).
-The table for a robot sending a request every 0.53 s was measured with an earlier version of the tool in `bench/`.
+[`window.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/window.py) and [`ping.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/ping.py), which also name the
+kernel code that does it (`tcp_cwnd_restart` and `tcp_cwnd_validate` in `tcp_output.c`, RFC 5681 section 4.1 and RFC
+2861). The table for a robot sending a request every 0.53 s was measured with an earlier version of the tool in
+`bench/`.

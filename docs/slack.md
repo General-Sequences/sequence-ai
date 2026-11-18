@@ -10,17 +10,17 @@ and passes it the current time.
 ```python
 from sequence_ai.engine import slack
 
-table = slack.measure(forward_of, sizes=[1, 2, 4])               # forward_of(n): one forward pass of n requests
-play = slack.playback(hz=20, valid_len=15, replan_at=8)          # 15 valid steps, the next requested at the 8th
-seating = slack.Seating(table, play["buffer_s"] * 1000, sizes=[1, 2, 4],
-                        cycle_ms=(play["play_s"] - play["buffer_s"]) * 1000)
-seats, over = seating.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
+table_user = slack.measure(forward_of_user, sizes=[1, 2, 4])  # forward_of_user(n): one forward pass of n requests
+play_user = slack.playback(hz=20, valid_len=15, replan_at=8)  # 15 valid steps, the next requested at the 8th
+seating_user = slack.Seating(table_user, play_user["buffer_s"] * 1000, sizes=[1, 2, 4],
+                             cycle_ms=(play_user["play_s"] - play_user["buffer_s"]) * 1000)
+seats_user, over_user = seating_user.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
 ```
 
 With forward passes of 80, 110 and 130 ms this gives `(4, ["far"])`: the replica has capacity for four robots, and the
 one 200 ms away is the one to move to another replica: its request may arrive as the near robot's batch runs, and
 would then miss its deadline. A batch of four fits the buffer of a robot 100 ms away, and four such robots, run on a
-clock, have every response in time.
+clock with these batch times, had every response in time.
 
 ```bash
 python examples/components/slack.py        # no model and no GPU: the rules on one pattern of arrivals
@@ -63,11 +63,10 @@ the margin before that.
   every smaller one. The clock rounds each batch time up by 3% at most and each RTT up to 10 ms, and keeps each
   verdict by them: a server's timings move by a few ms from one request to the next, and rounded they ask a question
   already answered.
-- **Each robot by its own RTT.** Robots are admitted nearest first, and robots that fit the same batch
-  size are batched together. A replica runs one batch at a time, so each group's batch must still be in time behind
-  the longest batch of another group, and the robots are run on the clock each with its own RTT. The robots beyond
-  that capacity, which are the furthest ones, are returned as `over`. A far robot never lowers the capacity available
-  to nearer ones.
+- **Each robot by its own RTT.** Robots are admitted nearest first, and robots that fit the same batch size are batched
+  together. A replica runs one batch at a time, so each group's batch must still be in time behind the longest batch of
+  another group, and the robots are run on the clock each with its own RTT. The robots beyond that capacity, which are
+  the furthest ones, are returned as `over_user`. A far robot never lowers the capacity available to nearer ones.
 - **The open batch waits for the replica's other robots** until its most urgent request can wait no longer: the
   latest time that request's response may leave, less the batch's time with one more request in it, less 50 ms. It
   waits only for a robot that is admitted to the replica, whose next request is due safely before then (a robot
@@ -85,22 +84,26 @@ the margin before that.
 ## In a server
 
 ```python
-aligner = slack.Aligner(table, play, seated=lambda: robots_on_this_replica)    # one per replica
+from sequence_ai.engine import slack
 
-aligner.arrived(robot, now, outside_ms=slack.outside_ms(reported))     # each request as it arrives
-wait_s = aligner.hold_s(open_requests, now)                            # the open batch may wait this long; 0.0: run it
-first = aligner.split(open_requests, now, [1, 2, 4], free=False)       # indexes to dispatch first; None: all as one
-aligner.answered(batch, now)                                           # as a batch's responses leave
-table.add(len(batch), forward_ms)                                      # each forward pass's time, as it is served
+aligner_user = slack.Aligner(table_user, play_user, seated=lambda: robots_on_this_replica_user)    # one per replica
+
+aligner_user.arrived(robot_user, now_user, outside_ms=slack.outside_ms(reported_user))  # each request as it arrives
+# the open batch may wait this long; 0.0: run it
+wait_s_user = aligner_user.hold_s(open_requests_user, now_user)
+# indexes to dispatch first; None: all as one
+first_user = aligner_user.split(open_requests_user, now_user, [1, 2, 4], free=False)
+aligner_user.answered(batch_user, now_user)                                             # as a batch's responses leave
+# each forward pass's time, as it is served
+table_user.add(len(batch_user), forward_ms_user)
 ```
 
-`open_requests` and `batch` are lists of robots, by the names their requests arrive under (strings; a request with
-no name is not scheduled). `now` is one monotonic clock,
-in seconds. Call `split` only when a replica is free to run the batch.
-`seating.seat(list(aligner.outsides_ms(now).items()))` computes the capacity of a replica from the RTT each robot last
-reported; `Seating(..., most=n)` caps a replica's robots (64 unless given; the serving stack this was taken from passes
-its largest listed size). [`examples/components/slack.py`](../examples/components/slack.py) has such a loop in about
-fifty lines, on a simulated clock.
+`open_requests_user` and `batch_user` are lists of robots, by the names their requests arrive under (strings; a request
+with no name is not scheduled). `now_user` is one monotonic clock, in seconds. Call `split` only when a replica is free
+to run the batch. `seating.seat(list(aligner.outsides_ms(now).items()))` computes the capacity of a replica from the RTT
+each robot last reported; `Seating(..., most=n)` caps a replica's robots (64 unless given; the serving stack this was
+taken from passes its largest listed size). [`examples/components/slack.py`](../examples/components/slack.py) has such a
+loop in about fifty lines, on a simulated clock.
 
 | In the file | What it provides |
 |---|---|
@@ -134,11 +137,11 @@ serving stack it was taken from.
   `per_replica` then computed the load by a formula. On a clock, as now, those capacities are the same, for robots
   20, 50 or 100 ms away.
   [How many robots can one GPU serve?](how-many-robots-can-one-gpu-serve.md#checked-on-a-real-model) has every cell.
-- **The capacity, on three models.** One L4, simulated robots of a 15 Hz policy 20 ms away, 60 s per cell, with the
-  load computed by that formula. For π0.5 and GR00T N1.6 it computed 2, and 2 robots had no late response (0.4% in
-  one cell of eight). For SmolVLA (batches of 1, 2, 4 and 8 in 256, 273, 303 and 377 ms) it computed 8, and 4 robots
-  had 95% and 97% of their responses late, 8 had 99%. Computed on a clock, the three capacities are 2, 2 and 1:
-  [Why the capacity is computed on a clock](how-many-robots-can-one-gpu-serve.md#why-the-capacity-is-computed-on-a-clock).
+- **The capacity, on three models.** One L4, simulated robots of a 15 Hz policy 20 ms away, 60 s per cell, with the load
+  computed by that formula. For π0.5 and GR00T N1.6 it computed 2, and 2 robots had no late response (0.4% in one cell
+  of eight). For SmolVLA (batches of 1, 2, 4 and 8 in 256, 273, 303 and 377 ms) it computed 8, and 4 robots had 95% and
+  97% of their responses late, 8 had 99%. Computed on a clock, the three capacities are 2, 2 and 1: [Why the capacity is
+  computed on a clock](how-many-robots-can-one-gpu-serve.md#why-the-capacity-is-computed-on-a-clock).
 - **The capacity on a clock, on a model.** SmolVLA on one L4 again, the same policy and test server, simulated robots
   about 30 ms away. The clock gave a capacity of 1, by the load: two robots' batches fill more than 0.9 of a cycle
   where each request runs alone. Two robots, one more than the capacity, had no late response in 226 (their
@@ -164,8 +167,7 @@ serving stack it was taken from.
   buffer), a stand-in model on a CPU. With every robot assumed to have a fixed 100 ms RTT and a batch timed
   by its forward pass alone, 459 of 1,114 responses arrived after their robot had run out of actions. A request
   waited a median 58 ms for a batch, took 197 ms more in the server and about 131 ms outside it: 386 ms against 350.
-  Per-robot RTT and batch times as served were added because of that. The late share after those
-  changes was not measured at the same settings.
+  Per-robot RTT and batch times as served were added because of that.
 - **Load.** Four robots, 300 s and about 2,100 requests per run: a stand-in on a CPU paced like a 15 Hz policy (15
   valid steps, the next request at the 8th: a 467 ms buffer, 533 ms between a robot's requests; batches of 1, 2 and 4
   in 234, 254 and 299 ms). All four on one replica, two batches of two in each 533 ms and a load of 0.95, had 85.7%
@@ -193,51 +195,21 @@ serving stack it was taken from.
   trial: `slack` runs the fleet on a simulated clock, and
   [`examples/fleet_on_a_clock.py`](../examples/fleet_on_a_clock.py) prints what each number of robots gets.
 
-## Limitations
+## Rules and requirements
 
 - **No slack, nothing to wait in.** A policy whose robot sends a request only when a chunk is fully executed (k = N)
   has no request held, and a replica serves one of its robots. `max_wait_s` changes that only by making the robot
   wait.
-- **A robot that does not report its RTT** is assumed to have 100 ms. If it is further away, its
-  responses arrive late and nothing here detects it.
+- **Each robot reports its RTT**; without one, 100 ms is assumed.
 - **One robot per replica** has nothing to batch with.
-- **A replica near full load.** Past about 0.9 of a cycle, responses queue behind each other however the requests are
-  held (the load measurement above). Capacity limits are what keep a replica out of that state, not the batching
-  delay.
-- **The capacity comes from a simulated clock, not from your model under load.** Every batch takes its timed p95,
-  rounded up, nothing else runs on the GPU, each robot has one request in flight and an RTT that does not vary, and a
-  robot that sent a request late reports the playback time it has left. The starts are a sample: on 150 fleets the
-  share of late responses they gave was within 2 points of what 1,024 starts gave, and an arrangement that fills
-  more than 0.9 of a cycle can fall between them. For three models' timing tables the clock gives what was measured
-  with them where it was measured: 2 robots for π0.5 and GR00T N1.6, and 1 for SmolVLA, where three or more robots
-  had late responses. All of that is one rate and one replan step (15 Hz, the next request at the 8th of 15 steps),
-  on one kind of GPU.
-- **Within capacity is not never late.** A fleet is within capacity with up to 5% of its responses late over the
-  starts, and those fall where the robots' requests are a particular distance apart: 5 to 25 ms for two π0.5 robots
-  100 ms away, with that model's batch times on an L4. Robots whose clocks keep them at such a distance are late for
-  as long as they stay there. The share is what a long run of drifting robots gets, not a bound on any stretch of
-  it.
+- **A replica is filled to at most 0.9 of a cycle**, which keeps its responses from queuing.
 - **A request due at the very instant its batch must go.** Batch times, RTTs and a cycle that add up exactly leave
   that choice to the last bit of a sum. The clock then takes one of the two ways a real server, whose timings vary,
   would alternate between, and the capacity is that of the way it took.
-- **Where the load ends the count, the capacity may be low.** For SmolVLA on an L4 the clock has two robots in time
-  in every start, at a load of 0.53 where their requests fall close enough to share a batch and 0.96 where they do
-  not. 0.96 is above the 0.9 limit, so the capacity is 1, and on the GPU two such robots had no late response in 226
-  and in 1,125 (above). The limit was set on one stand-in model (the load measurement above) and is kept: at 0.96 of
-  a cycle little is left for a network or a GPU that varies, and those two runs had their robots on the server's own
-  machine.
-- **A policy that requests its next chunk early** (k < N / 2) has more buffer than time between requests, so its
-  robots can be in time while they wait for each response and send less often than every k steps. The clock runs
-  them that way, and counts the load at the rate they ask for. No capacity for such a policy has been checked on a
-  model.
-- **The first computation takes time.** About 5 ms of one core for a capacity of 2, 35 ms for 4, 0.2 s for 8, 1 s
-  for 16 and 7 s for 32, and more for a policy that requests early. Each verdict is kept, so asking again is a
-  lookup. Compute it when a timing table or a robot's RTT changes, not on the path of a request.
-- **Robots at different distances are admitted for the worst arrival pattern.** A far robot is `over` beside nearer
-  ones wherever its request could arrive behind their batch and miss its deadline, even where, as its requests
-  happen to arrive, it is answered in time. The example prints exactly that case.
-- **It moves no robot and starts no replica.** `over` names which robots to move; where to is the caller's decision.
-- **A forward pass is timed by its batch size alone.** A model whose time depends on its input is timed by its p95.
+- **Compute the capacity ahead of time**, when a timing table or a robot's RTT changes: it takes from about 5 ms
+  for 2 robots to about 7 s for 32.
+- **Robots at different distances are admitted for their worst arrival pattern**, the safe side.
+- **`slack` computes who fits**; moving robots and starting replicas is the platform's job.
 
 ## Related work
 

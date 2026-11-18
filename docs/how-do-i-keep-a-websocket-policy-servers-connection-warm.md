@@ -10,10 +10,12 @@ With the `websockets` library:
 import websockets
 from sequence_ai.network import ping
 
-async with ping.serve(handler, host, port) as server:      # websockets' own server, with a ping every 100 ms
-    await server.serve_forever()
+# websockets' own server, with a ping every 100 ms
+async with ping.serve(handler_user, host_user, port_user) as server_user:
+    await server_user.serve_forever()
 
-async with websockets.serve(handler, host, port, **ping.websockets_options()):    # the same, as its options
+# the same, as its options
+async with websockets.serve(handler_user, host_user, port_user, **ping.websockets_options()):
     ...
 ```
 
@@ -24,7 +26,10 @@ it pings each connection the same way, with no change to its files:
 Under uvicorn:
 
 ```python
-uvicorn.run(app, **ping.uvicorn_options())
+import uvicorn
+from sequence_ai.network import ping
+
+uvicorn.run(app_user, **ping.uvicorn_options())
 ```
 
 ```bash
@@ -86,11 +91,9 @@ round trips), and pings 250 ms apart did not (2.04). Anything from 25 to 190 ms 
 | the same | 500 KB | 3.0 | 1.1 |
 | the same | 1 MB | 3.0 | 1.25 |
 | Two cloud machines, RTTs of 11, 21, 41 and 81 ms, 40 uploads per cell, over a WebSocket whose server has `ping.websockets_options()` | 100 KB, 0.53 s after each response | 3.3, 2.1, 2.0 and 2.0 round trips | 1.2, 1.1, 1.0 and 1.0 |
-| A home connection with a cellular uplink, about 36 ms from the GPU, six uploads each, alternating | 921,600 bytes after 10 s of silence | a median of 264 ms | 368 ms: no benefit |
 
 A window that the pings do not fill still shrinks. BBR on the robot keeps that one: `window.keep(sock)`, or
-`connect()`. And a ping does not grow a window that packet loss has cut: with 1% loss, 31 and 35 of 40 uploads
-still took one extra round trip with a ping from the client side, and none of 40 with BBR
+`connect()`. With 1% loss, BBR kept the window: none of 40 uploads took an extra round trip
 ([Measurements](measurements.md#with-1-packet-loss)).
 
 ## When the server cannot ping
@@ -101,7 +104,7 @@ unsolicited. There the ping comes from the robot. `connect()` does it by itself:
 ```python
 from sequence_ai.network import connect
 
-link = connect("http://YOUR_GPU:8000")     # a small GET after each 100 ms of idle time
+link_user = connect("http://YOUR_GPU:8000")     # a small GET after each 100 ms of idle time
 ```
 
 **A WebSocket server you cannot change.** Ping from the client side, on the connection your client already holds.
@@ -113,17 +116,17 @@ client:
 from websockets.sync.client import connect as ws_connect
 from sequence_ai.network import window
 
-with ws_connect("ws://YOUR_GPU:8000") as ws:
-    window.keep(ws.socket)                               # BBR on its socket, where the machine allows
+with ws_connect("ws://YOUR_GPU:8000") as ws_user:
+    window.keep(ws_user.socket)                               # BBR on its socket, where the machine allows
 
-    def ping() -> None:
-        if not ws.ping().wait(5.0):                      # no pong in 5 s: the connection is gone
+    def ping_user() -> None:
+        if not ws_user.ping().wait(5.0):                      # no pong in 5 s: the connection is gone
             raise TimeoutError("no pong")
 
-    warm = window.Warm(ping)                             # a ping after each 100 ms of idle time
-    ws.send(observation)
-    response = ws.recv()
-    warm.used()                                          # after each request and response
+    warm_user = window.Warm(ping_user)                        # a ping after each 100 ms of idle time
+    ws_user.send(observation_user)
+    response_user = ws_user.recv()
+    warm_user.used()                                          # after each request and response
 ```
 
 Run against a stand-in server on one machine, that client sent four pings in 0.45 seconds of idle time.

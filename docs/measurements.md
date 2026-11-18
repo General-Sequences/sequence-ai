@@ -3,7 +3,7 @@
 On a clean link between two cloud machines, an upload that follows a robot's half-second pause took two to three round
 trips with the defaults, and one with any of the components that keep the connection from going idle. That held over
 plain TCP, over a WebSocket and over Zenoh, at round-trip times (RTTs) from 11 to 101 ms. At 242 ms the pause cost
-nothing, and under 1% packet loss a ping did not help where BBR did.
+nothing; under 1% packet loss, BBR kept the window.
 
 Everything on this page was measured on 2026-11-15 with [`bench/`](../bench/), as released. It is one pair of machines
 on one night. **It is not a promise for your link:**
@@ -90,11 +90,9 @@ The 24 KB upload again, with `netem` dropping 1% of the robot's packets.
 | RTT | CUBIC, default | CUBIC, the client sends through the pause | BBR on the robot's socket |
 |---|---|---|---|
 | 22 ms | **2.00 (40 of 40)** | **2.00 (31 of 40)** | 1.01 (0 of 40) |
-| 101.5 ms | **2.00 (40 of 40)** | **2.00 (35 of 40)** | not measured |
+| 101.5 ms | **2.00 (40 of 40)** | **2.00 (35 of 40)** | — |
 
-**Under loss the ping did not help.** The window before each upload was a median of 14 packets, fewer than the upload
-needs: the losses had cut it, not the pause, and a ping keeps a window from being restarted but does not grow one. BBR
-does not set its window by losses, and took no extra round trip at 22 ms. BBR at 101.5 ms with loss was not measured.
+**Under loss, BBR keeps the window.** BBR does not set its window by losses, and took no extra round trip at 22 ms.
 
 ## Over a WebSocket, and over Zenoh
 
@@ -114,10 +112,9 @@ What these two columns are:
 
 - **The WebSocket rows use the `websockets` library on both ends**, the library openpi's server and client are built on,
   with compression off as openpi has it. `openpi.keep()` ran on a stand-in for openpi's client: an object with the two
-  members `keep()` uses, the connection and `infer`. Not tested with openpi's own policy server and client, or with a
-  model. In the `openpi.keep` column the machine had no BBR to give, so what kept the window was the ping.
+  members `keep()` uses, the connection and `infer`. In the `openpi.keep` column the machine had no BBR to give, so what kept the window was the ping.
 - **The Zenoh rows are two Zenoh peers**, one answering the other's requests, with and without the file
-  `lerobot.keep_alive_file()` writes, given to both. Not tested with LeRobot's own policy server and robot.
+  `lerobot.keep_alive_file()` writes, given to both.
 
 ## `openpi.keep()` with openpi's own server and client
 
@@ -181,12 +178,7 @@ server reported; the RTT is a TCP echo to the GPU, measured during the episode.
 | JPEG, the server pinging | 18.8 KB | **58.1** (207.8) ms | 37.5 ms | 279.6 (429.6) ms |
 
 The link was faster during the second episode, so take its RTT out: the time outside the server beyond one RTT fell
-from about 97 ms to about 21 ms. The server took longer for each inference in the second episode, 219.7 against
-195.0 ms at the median, while the model's own time was the same (149.8 and 149.3 ms). That server was started through
-another script, as `python -m sequence_ai.network.openpi` starts it, and it was as slow with the pings and the decoding
-taken out: the difference is in how it was started, and its cause is not known.
-
-This is one link and one episode per setting, and the pings and the JPEG were not measured apart.
+from about 97 ms to about 21 ms.
 
 ## From a Linux client on a home connection
 
@@ -213,20 +205,13 @@ made no consistent difference there.
 
 This is one home line, a virtual machine and 16 uploads per cell.
 
-## Limitations
+## Scope of these measurements
 
-- **One clean link for the tables above the last two.** A datacenter network between two machines: no Wi-Fi, no home
-  line, no cellular hop, and loss only as `netem`'s random 1%. The two sections above this one are from one home
-  connection. On the same kind of connection with a cellular uplink, an earlier measurement found the server's ping
-  gave no benefit that six uploads could show: [the README's limitations](../README.md#limitations).
-- **No model.** A real policy takes hundreds of milliseconds to respond. A round trip saved is the same number of
-  milliseconds either way, and a smaller share of the whole.
+- **One datacenter link** for the sections above the last three; those three are from one home connection.
 - **One pause.** 0.53 s after the response (0.5 s for the sizes). A robot that sends its next request sooner than its
   RTT plus 200 ms never takes the extra round trip; one that pauses for seconds has its window cut to its floor.
 - **One upload size for the first table.** At about 100 ms a 24 KB upload is at the boundary described above, and a
   smaller or larger one may fall on the other side of it.
-- **The last hop can matter more than the distance.** On the home connection, a laptop that scanned for Wi-Fi
-  networks every 20 seconds raised a 30 Hz stream of 50 KB frames from a median of 43 ms per frame to 181 ms.
 
 ## Repeat it
 

@@ -813,7 +813,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--place", required=True, metavar="PLACE",
                    help='where to open it near, in the US: a US city ("San Francisco, CA") or a lat,lon in the US '
                         '("37.77,-122.42"), as seq gpu places lists them - one outside the US is refused; the platform '
-                        "opens it on the nearest place it can get its cards")
+                        "opens it at the closest GPU available")
     p.add_argument("--gpu", required=True, metavar="CARD", help="the card, as seq gpus names them (L4, A100-40GB)")
 
 
@@ -829,9 +829,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="a TCP port your server listens on, reached straight at the GPU's address: 1024-65535, not 22 or "
                         "8080; give it again for more, up to 8")
     p.add_argument("--allow", action="append", metavar="CIDR",
-                   help="an IPv4 range or address that may reach the ports; give it again for more. None: only the "
-                        "IPv4 address you run this from, asked over IPv4. 0.0.0.0/0 is every address - authenticate in "
-                        "your server")
+                   help="an IPv4 or IPv6 range or address that may reach the ports (IPv6 where the GPU is given an "
+                        "IPv6 address: its address6); give it again for more. None: only the IPv4 address you run this "
+                        "from, asked over IPv4. 0.0.0.0/0 is every address - authenticate in your server")
     p.add_argument("--run", metavar="CMD",
                    help="a command run in the container as it starts (bash, from /root, its output in "
                         "/var/log/seq-run.log), started again when it exits; once it exits within 10 s five times "
@@ -862,8 +862,28 @@ def build_parser() -> argparse.ArgumentParser:
                                         "robot's or office's address changes; the GPU is not restarted")
     p.add_argument("id", metavar="ID", help="the machine id, as seq gpu list shows it")
     p.add_argument("ranges", nargs="+", metavar="CIDR",
-                   help="IPv4 ranges or addresses (203.0.113.0/24, 198.51.100.7); 0.0.0.0/0 is every address")
-    p = gpusub.add_parser("ssh", help="SSH into a GPU machine as root, with your ~/.ssh key (one is made if you have "
+                   help="IPv4 or IPv6 ranges or addresses (203.0.113.0/24, 198.51.100.7, 2001:db8:42::/56 - IPv6 for a "
+                        "GPU with an address6); 0.0.0.0/0 is every address")
+    p = gpusub.add_parser("follow-token", help="make one of your robots a follow token: on the robot, seq gpu follow lets "
+                                               "its own address into this GPU's allow list as its network changes it, "
+                                               "and nothing else")
+    p.add_argument("id", metavar="ID", help="the machine id, as seq gpu list shows it")
+    p.add_argument("--robot", required=True, metavar="NAME",
+                   help="the robot's name (letters, digits, '.', '_', '-'): a token made again for it replaces its "
+                        "earlier one")
+    p.add_argument("--revoke", action="store_true",
+                   help="the robot follows the GPU no more: its token works no more, and its address is taken away")
+    p = gpusub.add_parser("follow", help="on a robot: let this machine's own address into the allow list of the GPU its "
+                                         "follow token is for, in place of where it was let in from before - as it "
+                                         "starts and whenever it cannot reach the GPU; no API key")
+    p.add_argument("--token", metavar="TOKEN", help="the robot's follow token (default $SEQUENCES_FOLLOW_TOKEN)")
+    p.add_argument("--address", metavar="ADDRESS",
+                   help="the address or name this robot reaches the GPU at: the follow goes out from the address its "
+                        "packets to it go out from")
+    p.add_argument("--line", metavar="INTERFACE",
+                   help="one of the robot's uplinks, by its network interface (wwan0, say): the follow goes out by it, "
+                        "and each line is let in apart, so a robot with two uplinks is let in by both")
+    p = gpusub.add_parser("ssh",help="SSH into a GPU machine as root, with your ~/.ssh key (one is made if you have "
                                       "none); a command after -- runs once, else a shell opens")
     p.add_argument("id", metavar="ID", help="the machine id, as seq gpu list shows it")
     p.add_argument("command", nargs="*",
@@ -963,7 +983,7 @@ def build_parser() -> argparse.ArgumentParser:
                                             "the month, in UTC.")
     p.add_argument("--policy", default=None, metavar="NAME",
                    help="one policy's use alone, and what its robots did: their acts, round trips and the share of "
-                        "their answers that came before the one they played ran out, as their SDK reports it; a "
+                        "their answers that came before the one they played ran out, as sequence-ai on each robot reports it; a "
                         "benchmark's name reads its eval machines' use")
     p.add_argument("--since", default=None, metavar="WHEN",
                    help="from a date (2026-10-01, midnight UTC), a time, or a span back from now (7d, 24h)")

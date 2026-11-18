@@ -228,3 +228,26 @@ def _same(got, want):
             _same(g, w)
     else:
         assert got == want
+
+
+def test_a_pil_image_is_sent_as_its_array():
+    """A PIL image - frames.resize_image's output - is packed as the numpy array its pixels are, and read back as that
+    array; without this a robot's fitted frame was refused "Image cannot be sent as msgpack"."""
+    np = pytest.importorskip("numpy")
+    Image = pytest.importorskip("PIL.Image")
+    pixels = (np.arange(40 * 50 * 3) % 251).astype(np.uint8).reshape(40, 50, 3)
+    got = unpack(pack({"image": Image.fromarray(pixels), "gray": Image.fromarray(pixels[..., 0])}))
+    assert np.array_equal(got["image"], pixels) and got["image"].dtype == np.uint8
+    assert np.array_equal(got["gray"], pixels[..., 0])
+
+
+def test_a_pil_module_still_being_imported_leaves_arrays_packed_as_arrays(monkeypatch):
+    """frames.warm() imports Pillow on a thread of its own as the server first says it reads JPEG, and the robot's
+    first act packs meanwhile: PIL.Image is in sys.modules with no Image class yet, and every array is packed as it
+    is, where reading that class raised AttributeError."""
+    np = pytest.importorskip("numpy")
+    import types
+
+    monkeypatch.setitem(sys.modules, "PIL.Image", types.ModuleType("PIL.Image"))     # its Image not defined yet
+    state = np.arange(6, dtype=np.float32)
+    assert np.array_equal(unpack(pack({"state": state}))["state"], state)

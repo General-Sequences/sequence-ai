@@ -9,11 +9,11 @@ their requests as batches.
 ```python
 from sequence_ai.engine import slack
 
-table = slack.measure(forward_of, sizes=[1, 2, 4])               # forward_of(n): one forward pass of n requests
-play = slack.playback(hz=20, valid_len=15, replan_at=8)          # 15 valid steps, the next requested at the 8th
-seating = slack.Seating(table, play["buffer_s"] * 1000, sizes=[1, 2, 4],
-                        cycle_ms=(play["play_s"] - play["buffer_s"]) * 1000)
-seats, over = seating.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
+table_user = slack.measure(forward_of_user, sizes=[1, 2, 4])  # forward_of_user(n): one forward pass of n requests
+play_user = slack.playback(hz=20, valid_len=15, replan_at=8)  # 15 valid steps, the next requested at the 8th
+seating_user = slack.Seating(table_user, play_user["buffer_s"] * 1000, sizes=[1, 2, 4],
+                             cycle_ms=(play_user["play_s"] - play_user["buffer_s"]) * 1000)
+seats_user, over_user = seating_user.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
 ```
 
 With batches of 1, 2 and 4 that take 80, 110 and 130 ms, this gives `(4, ["far"])`: the replica has capacity for
@@ -60,13 +60,21 @@ first, and each row of the output through its output transform. Timed that way, 
 2, 3, 4 and 8 took 195, 312, 429, 540 and 1,027 ms: 5.1 requests per second at batch 1 and 7.8 at batch 8, 1.52 times.
 Under JAX each batch size compiled on its first call, in 32 to 43 s.
 
+One replica per GPU: one copy of the model answers all its robots in one pass.
+
 ## Sending the batches
+
+With `serve()`, batching is one argument: `serve(policy_on_a_list, batch=[1, 2, 4, 8])` sends the observations waiting
+to `policy_on_a_list` as one list, through the `Batcher` below, and each robot gets its own output back ([How do I serve
+a robot policy from my own GPU?](how-do-i-serve-a-robot-policy-from-my-own-gpu.md#your-model-as-a-function)). In a
+server of your own:
 
 ```python
 from sequence_ai.engine.batcher import Batcher
 
-batcher = Batcher(model_on_a_list, sizes=[1, 2, 4, 8], wait_ms=2.0)    # model_on_a_list(inputs: list) -> list
-output = await batcher(observation)                                     # in each request's handler
+# model_on_a_list_user(inputs: list) -> list
+batcher_user = Batcher(model_on_a_list_user, sizes=[1, 2, 4, 8], wait_ms=2.0)
+output_user = await batcher_user(observation_user)  # in each request's handler
 ```
 
 - A batch is dispatched as soon as it is full, or `wait_ms` after its first call arrived while the model is free.
@@ -131,9 +139,7 @@ size on a given GPU: [What batching itself gains](#what-batching-itself-gains).
   share of a 60 s run, 39.8 to 89.5%, therefore measures when the queue formed, in one run per cell, and says nothing
   about the waiting rule.
 
-Not measured: openpi's server with 3 robots or at 20 Hz, the test server with one robot at 20 Hz, and anything of
-the network layer, because the relay adds delay only, with no loss and no idle restart. One GPU, one model and one
-run per cell.
+One GPU, one model and one run per cell.
 
 ## Why the capacity is computed on a clock
 
@@ -154,8 +160,8 @@ their requests together. The four ran as two fixed pairs in turn, each request b
 533 ms between a robot's requests, so after the first 4 to 6 s every response was late. The formula also returned the
 largest number of robots that passed it, and with these times two failed where three to eight passed.
 
-`slack` now runs the robots on a clock, which has both. [`examples/fleet_on_a_clock.py`](../examples/fleet_on_a_clock.py)
-prints what it runs, here with SmolVLA's times:
+`slack` now runs the robots on a clock, which has both.
+[`examples/fleet_on_a_clock.py`](../examples/fleet_on_a_clock.py) prints what it runs, here with SmolVLA's times:
 
 ```bash
 python examples/fleet_on_a_clock.py --times 1:256,2:273,4:303,8:377
@@ -204,14 +210,7 @@ steps, the next requested at the 8th: a 467 ms buffer, 533 ms between a robot's 
 Two per replica on two replicas, a load of 0.88, had 94.1%, on the slower network of the two runs. The 0.9 is set from
 those two runs, in the serving stack `slack` was taken from, not with the file itself.
 
-## Limitations
+## When it applies
 
-- **A policy that leaves no slack.** Where the robot sends a request only when a chunk is fully executed, a replica
-  serves one robot.
-- **A robot that does not report its RTT** is assumed to have 100 ms. If it is further away, its responses arrive
-  late.
-- **A model whose time depends on its input** is timed by the p95 of its batch size alone.
-- **The capacity comes from a simulated clock**, not from your model under load:
-  [what the clock leaves out](slack.md#limitations).
-- **More replicas on the same GPU do not add capacity:**
-  [Should I run two replicas of a policy on one GPU?](should-i-run-two-replicas-of-a-policy-on-one-gpu.md)
+- A policy whose robots wait for each response leaves no slack, so its replica serves one robot.
+- Each robot reports its RTT; without one, 100 ms is assumed.

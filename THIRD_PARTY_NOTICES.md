@@ -1,6 +1,6 @@
 # Third-party notices
 
-`sequence-ai` is licensed under the Apache License, Version 2.0. One of its components is adapted from another
+`sequence-ai` is licensed under the Apache License, Version 2.0. Parts of two of its components are adapted from another
 open-source project, and the page `seq eval replay` serves carries other projects' files unchanged. Each is named here
 with its license.
 
@@ -12,6 +12,11 @@ with its license.
   `packages/openpi-client/src/openpi_client/image_tools.py` of
   [Physical-Intelligence/openpi](https://github.com/Physical-Intelligence/openpi).
 - **Why:** so that a frame resized here is, byte for byte, the frame openpi's own client sends.
+- **Where:** `sequence_ai/engine/openpi.py`, `batched`.
+- **From:** `Policy.infer` in `src/openpi/policies/policy.py` of
+  [Physical-Intelligence/openpi](https://github.com/Physical-Intelligence/openpi).
+- **Why:** so that each observation of a batch passes through the same transforms, and its output is the dict, that
+  openpi's own `infer()` gives it.
 - **License:** Apache License, Version 2.0, the same as this project's [LICENSE](LICENSE).
 
 ## Files the replay page carries unchanged
@@ -22,11 +27,12 @@ with its license.
 |---|---|---|
 | `assets/vendor/three/` | [three.js](https://github.com/mrdoob/three.js), Copyright © 2010-2026 three.js authors | MIT, in `assets/vendor/three/LICENSE.txt` |
 | `assets/vendor/fzstd/` | [fzstd](https://github.com/101arrowz/fzstd), Copyright (c) 2020 Arjun Barrett | MIT, in `assets/vendor/fzstd/LICENSE.txt` |
-| `assets/fonts/commissioner-*.woff2` | Copyright 2019 The Commissioner Project Authors (https://github.com/kosbarts/Commissioner) | SIL Open Font License 1.1 |
-| `assets/fonts/geist-*.woff2` | Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font.git) | SIL Open Font License 1.1 |
-| `assets/fonts/jetbrains-mono-*.woff2` | Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono) | SIL Open Font License 1.1 |
+| `assets/fonts/commissioner-*.woff2` | Copyright 2019 The Commissioner Project Authors (https://github.com/kosbarts/Commissioner) | SIL Open Font License 1.1, in `seq/_replay_player/licenses/OFL-commissioner.txt` |
+| `assets/fonts/geist-*.woff2` | Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font.git) | SIL Open Font License 1.1, in `seq/_replay_player/licenses/OFL-geist.txt` |
+| `assets/fonts/jetbrains-mono-*.woff2` | Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono) | SIL Open Font License 1.1, in `seq/_replay_player/licenses/OFL-jetbrains-mono.txt` |
 
-The SIL Open Font License, Version 1.1, is at <https://openfontlicense.org>.
+Each font's copyright notice and the full text of the SIL Open Font License, Version 1.1, travel with the fonts in
+`seq/_replay_player/licenses/`, as the license asks; it is also at <https://openfontlicense.org>.
 
 ## Acknowledgements
 

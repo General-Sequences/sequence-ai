@@ -36,34 +36,34 @@ from sequence_ai.engine.batcher import Batcher
 from sequence_ai.engine.replicas import ReplicaPool
 
 
-def load():
+def load_user():
     """Runs in the replica's own process: build your model here, and return what one batch of requests runs."""
-    def model_on_a_list(observations: list) -> list:
+    def model_on_a_list_user(observations_user: list) -> list:
         time.sleep(0.05)                                   # one forward pass, whatever the batch: your model's call
-        return [{"actions": [[observation] * 7] * 8, "pid": os.getpid()} for observation in observations]
+        return [{"actions": [[observation_user] * 7] * 8, "pid": os.getpid()} for observation_user in observations_user]
 
-    return model_on_a_list
+    return model_on_a_list_user
 
 
-async def main() -> None:
-    pool = ReplicaPool(load, replicas=1)                   # one replica per GPU; devices=[0] sets the GPU it sees
-    batcher = Batcher(pool.run, sizes=[1, 2, 4, 8], wait_ms=2.0)
+async def main_user() -> None:
+    pool_user = ReplicaPool(load_user, replicas=1)        # one replica per GPU; devices=[0] sets the GPU it sees
+    batcher_user = Batcher(pool_user.run, sizes=[1, 2, 4, 8], wait_ms=2.0)
     try:
-        started = time.perf_counter()
+        started_user = time.perf_counter()
         # in your own server, each request's handler awaits batcher(observation)
-        outputs = await asyncio.gather(*(batcher(float(robot)) for robot in range(5)))
-        took = (time.perf_counter() - started) * 1e3
-        print(f"5 robots served in {took:.0f} ms, as batches of {dict(batcher.sent)}")
-        actions = outputs[3]["actions"]
-        print(f"robot 3's own response: {len(actions)} actions of {len(actions[0])} numbers, "
-              f"the first {actions[0][:3]}")
-        print(f"this process is {os.getpid()}; the model ran in {outputs[3]['pid']}")
+        outputs_user = await asyncio.gather(*(batcher_user(float(robot_user)) for robot_user in range(5)))
+        took_user = (time.perf_counter() - started_user) * 1e3
+        print(f"5 robots served in {took_user:.0f} ms, as batches of {dict(batcher_user.sent)}")
+        actions_user = outputs_user[3]["actions"]
+        print(f"robot 3's own response: {len(actions_user)} actions of {len(actions_user[0])} numbers, "
+              f"the first {actions_user[0][:3]}")
+        print(f"this process is {os.getpid()}; the model ran in {outputs_user[3]['pid']}")
     finally:
-        pool.close()
+        pool_user.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main_user())
 ```
 
 ```bash
@@ -92,9 +92,9 @@ a real model depends on where the model spends its time:
 
 ## Use your own model
 
-1. **Your model.** In `load`, build your model and return a function that takes a list of observations and returns a
-   list of outputs, one per observation. `load` is defined at the top of a module, because each replica imports it in
-   its own process.
+1. **Your model.** In `load_user`, build your model and return a function that takes a list of observations and returns
+   a list of outputs, one per observation. `load_user` is defined at the top of a module, because each replica imports
+   it in its own process.
 2. **Your server.** In each request's handler, `output = await batcher(observation)`. Any async server works; the
    components are independent of HTTP.
 3. **Your GPU.** `ReplicaPool(load, replicas=2, devices=[0, 1])` gives each replica its own GPU. On one GPU use one
@@ -119,12 +119,14 @@ same outputs, byte for byte: True
 eager 1.14 ms per run; no CUDA GPU available, so nothing was graphed
 ```
 
-On a GPU it captures the module, checks the output against eager mode's byte for byte, and prints both timings.
-[How do I make a PyTorch robot policy faster without changing its outputs?](how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
+On a GPU it captures the module, checks the output against eager mode's byte for byte, and prints both timings. [How do
+I make a PyTorch robot policy faster without changing its
+outputs?](how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
 
 ## Where to go next
 
 - [How many robots can one GPU serve?](how-many-robots-can-one-gpu-serve.md)
-- [How do I use the inference components with openpi, LeRobot or GR00T?](how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md)
+- [How do I use the inference components with openpi, LeRobot or
+  GR00T?](how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md)
 - [How do I get a GPU near my robot?](how-do-i-get-a-gpu-near-my-robot.md)
 - A step failed: [FAQ](faq.md)

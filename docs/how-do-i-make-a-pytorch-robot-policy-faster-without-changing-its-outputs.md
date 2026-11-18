@@ -8,9 +8,9 @@ actions. It gains nothing on a model that already fuses and graphs its kernels.
 ```python
 from sequence_ai.engine import cuda_graphs
 
-cuda_graphs.install(model, ["action_head.denoiser"])    # model.action_head.denoiser, graphed in place
-model(observation)                                       # a new shape: run in eager mode, captured, checked
-model(observation)                                       # replayed
+cuda_graphs.install(model_user, ["action_head.denoiser"])    # model.action_head.denoiser, graphed in place
+model_user(observation_user)                                       # a new shape: run in eager mode, captured, checked
+model_user(observation_user)                                       # replayed
 ```
 
 Nothing else in your code changes. The module stays where it is in your model, the same object of the same class,
@@ -46,13 +46,15 @@ fails or differs runs in eager mode from then on, which is reported once.
 One that is called more than once per run with the same shapes. To find it, count the calls over a few runs:
 
 ```python
-census = cuda_graphs.Census(cuda_graphs.modules_of(model))
+from sequence_ai.engine import cuda_graphs
+
+census_user = cuda_graphs.Census(cuda_graphs.modules_of(model_user))
 for _ in range(3):
-    model(observation)                                   # one inference, as your code makes it
-    census.end_act()
-census.close()
-paths = [row["path"] for row in census.candidates()]    # the outermost and slowest first
-cuda_graphs.install(model, paths[:1])
+    model_user(observation_user)                                   # one inference, as your code makes it
+    census_user.end_act()
+census_user.close()
+paths_user = [row_user["path"] for row_user in census_user.candidates()]    # the outermost and slowest first
+cuda_graphs.install(model_user, paths_user[:1])
 ```
 
 [`examples/graph_a_module.py`](../examples/graph_a_module.py) does all of it on a small flow-style model, and runs on
@@ -61,13 +63,16 @@ a machine with no GPU, where it prints which module it would graph and leaves th
 ## Check it on your GPU
 
 ```python
+import torch
+from sequence_ai.engine import cuda_graphs
+
 torch.manual_seed(0)                                     # a policy that draws noise: the same noise for each run
-eager = model(observation)
-cuda_graphs.install(model, paths[:1])
+eager_user = model_user(observation_user)
+cuda_graphs.install(model_user, paths_user[:1])
 torch.manual_seed(0)
-model(observation)                                       # a new shape: captured, and checked against eager mode here
+model_user(observation_user)  # a new shape: captured, and checked against eager mode here
 torch.manual_seed(0)
-print(cuda_graphs.same(eager, model(observation)))       # True: a replayed run, byte for byte
+print(cuda_graphs.same(eager_user, model_user(observation_user)))       # True: a replayed run, byte for byte
 cuda_graphs.ACTIVE = False                               # the same model in eager mode again, to compare timings
 ```
 
@@ -83,16 +88,13 @@ inputs the capture never saw, the model's random noise unchanged, a new batch si
 - **What your model checks about its module still holds:** `isinstance`, its type, its methods and its hooks, which
   fire around a replayed call too.
 
-## Limitations
+## When it applies
 
-- **A model that already fuses and graphs its kernels.** π0.5 under JAX was 98% GPU-busy: there is no launch overhead
-  left to remove. `cuda_graphs` is for PyTorch.
-- **A module called once per run.** There is one launch sequence to save, not many.
-- **Shapes that keep changing.** Each new shape is captured and checked once. A model whose shapes differ on every
-  call spends its time capturing. A prompt of a new length is a new shape, captured the first time it occurs.
-- **No CUDA GPU.** Nothing is graphed, which is reported once, and the model runs as before.
-- **torch before 2.4.** It cannot swap the GPU's random generator during a capture, so nothing is captured.
-- **Measured on two models.** Only GR00T N1.7's DiT and a small test model have been captured this way. LeRobot's
-  policies and openpi's PyTorch models have not been tested with it:
-  [How do I use the inference components with openpi, LeRobot or GR00T?](how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md)
-  TensorRT and other compilers were not compared.
+- **A PyTorch model that launches many small kernels.** A model that already fuses and compiles its kernels, such as
+  π0.5 under JAX at 98% GPU-busy, has no launch overhead to remove.
+- **A module called many times per run.** A module called once has one launch sequence to save.
+- **Shapes that repeat.** Each new shape is captured and checked once, so a module gains from a shape's second call
+  on. A prompt of a new length is a new shape, captured the first time it occurs.
+- **A CUDA GPU.** Without one, nothing is graphed, which is reported once, and the model runs as before.
+- **torch 2.4 or later,** which lets a capture swap the GPU's random generator; with an earlier torch, nothing is
+  captured.

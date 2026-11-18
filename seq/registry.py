@@ -625,8 +625,8 @@ def _check_infer_signature(cls: type, method_name: str) -> None:
 
 def plan_one_machine(card: str) -> str:
     """Why a policy with a @seq.plan does not run across several machines, `card` the type it declared: every machine
-    of the copy has a `self` of its own and would plan its robots apart. The worker says the same
-, and the gateway (deployments/validation.py plan_one_machine)."""
+    of the copy has a `self` of its own and would plan its robots apart. The worker and the platform
+    say the same."""
     return (f"a policy with a @seq.plan runs on one machine: across several, each machine would plan apart. Declare at "
             f'most {MACHINE_CARDS} cards (gpu="{card}:{MACHINE_CARDS}")')
 
@@ -634,8 +634,8 @@ def plan_one_machine(card: str) -> str:
 def plan_layout(gpu: Any) -> str | None:
     """Why a policy with a @seq.plan cannot run as it declares, or None: its episode plans in the copy that holds it, so
     it runs on one machine (more cards than a machine holds is plan_one_machine). Several copies on one machine are
-    fine: a robot's episode is on one of them. The gateway holds a deploy to the same rule (deployments/validation.py
-    _check_plan), and the worker before its weights load."""
+    fine: a robot's episode is on one of them. The platform holds a deploy to the same rule, and the worker before
+    its weights load."""
     if _cards(gpu) > MACHINE_CARDS:
         return plan_one_machine(str(gpu).partition(":")[0])
     return None

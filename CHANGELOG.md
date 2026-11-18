@@ -3,6 +3,22 @@
 What changed in each release of `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
+## 0.63.0 — 2026-11-18
+
+`sequence_ai.serve(policy)` serves a model in one call with the defaults on at both ends, and
+`python -m sequence_ai.check <url>` says which are on.
+
+### Added
+
+- `connect(url, lines=["eth0", "wwan0"])` sends each act over two uplinks, and the robot uses the first answer.
+- A rented GPU's ports take IPv6 ranges, and `connect(url, follow=token)` lets a robot's changing address in, each
+  line's with `lines=`.
+
+### Fixed
+
+- A robot with no standby whose worker stops answering reconnects within a few control periods, not after its act's
+  timeout.
+
 ## 0.62.3 — 2026-11-17
 
 `pip install sequence-ai` now installs everything the quick start needs, and `sequence-ai` is called an open-source
@@ -413,7 +429,7 @@ robots, and GPUs start faster when cards are short.
 
 ### Changed
 
-- Every GPU request asks the three nearest places at once, and a second machine is billed only while it held a card.
+- GPU requests start faster when cards are short.
 - A connected robot holds its worker, billed, and when a new version goes live its next call raises `NewVersion`:
   `connect()` again (older SDKs reconnect by themselves).
 
@@ -721,8 +737,8 @@ A robot says where its worker runs and why, and `seq usage` and `seq eval report
 
 ### Added
 
-- When a robot connects or moves to another worker, it says which of our regions that worker runs in, and about how
-  far away it is when it is far; `seq policy status` says under each robot why it sits on its worker.
+- When a robot connects or moves to another worker, it says about how far away that worker is when it is far;
+  `seq policy status` says under each robot why it sits on its worker.
 - `seq usage --policy` lists each robot by the key it connects with - its acts, errors, round trips and on-time - and
   `seq eval report` shows the link between the benchmark's and the policy's machines.
 

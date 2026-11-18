@@ -7,7 +7,7 @@ in its own process. Standard library only: no GPU and no torch needed to see it 
     pip install sequence-ai
     python quickstart.py
 
-Put your model where `model_on_a_list` is. docs/quickstart.md walks through it.
+Put your model where `model_on_a_list_user` is. docs/quickstart.md walks through it.
 """
 import asyncio
 import os
@@ -17,31 +17,31 @@ from sequence_ai.engine.batcher import Batcher
 from sequence_ai.engine.replicas import ReplicaPool
 
 
-def load():
+def load_user():
     """Runs in the replica's own process: build your model here, and return what one batch of requests runs."""
-    def model_on_a_list(observations: list) -> list:
+    def model_on_a_list_user(observations_user: list) -> list:
         time.sleep(0.05)                                   # one forward pass, whatever the batch: your model's call
-        return [{"actions": [[observation] * 7] * 8, "pid": os.getpid()} for observation in observations]
+        return [{"actions": [[observation_user] * 7] * 8, "pid": os.getpid()} for observation_user in observations_user]
 
-    return model_on_a_list
+    return model_on_a_list_user
 
 
-async def main() -> None:
-    pool = ReplicaPool(load, replicas=1)                   # one replica per GPU; devices=[0] sets the GPU it sees
-    batcher = Batcher(pool.run, sizes=[1, 2, 4, 8], wait_ms=2.0)
+async def main_user() -> None:
+    pool_user = ReplicaPool(load_user, replicas=1)        # one replica per GPU; devices=[0] sets the GPU it sees
+    batcher_user = Batcher(pool_user.run, sizes=[1, 2, 4, 8], wait_ms=2.0)
     try:
-        started = time.perf_counter()
+        started_user = time.perf_counter()
         # in your own server, each request's handler awaits batcher(observation)
-        outputs = await asyncio.gather(*(batcher(float(robot)) for robot in range(5)))
-        took = (time.perf_counter() - started) * 1e3
-        print(f"5 robots served in {took:.0f} ms, as batches of {dict(batcher.sent)}")
-        actions = outputs[3]["actions"]
-        print(f"robot 3's own response: {len(actions)} actions of {len(actions[0])} numbers, "
-              f"the first {actions[0][:3]}")
-        print(f"this process is {os.getpid()}; the model ran in {outputs[3]['pid']}")
+        outputs_user = await asyncio.gather(*(batcher_user(float(robot_user)) for robot_user in range(5)))
+        took_user = (time.perf_counter() - started_user) * 1e3
+        print(f"5 robots served in {took_user:.0f} ms, as batches of {dict(batcher_user.sent)}")
+        actions_user = outputs_user[3]["actions"]
+        print(f"robot 3's own response: {len(actions_user)} actions of {len(actions_user[0])} numbers, "
+              f"the first {actions_user[0][:3]}")
+        print(f"this process is {os.getpid()}; the model ran in {outputs_user[3]['pid']}")
     finally:
-        pool.close()
+        pool_user.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main_user())

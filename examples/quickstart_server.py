@@ -1,54 +1,31 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 General Sequences Company
 # SPDX-License-Identifier: Apache-2.0
 """
-Quickstart, server side: a policy server in one file. Put your model where `policy` is.
+Quickstart, server side: a policy server in one call. Put your model where `policy_user` is.
 
     pip install sequence-ai
-    python quickstart_server.py                  # on this machine: 127.0.0.1:8000
-    python quickstart_server.py 0.0.0.0 8000     # on your GPU, for a robot elsewhere
+    python quickstart_server.py                  # every address of this machine, port 8000
+    python quickstart_server.py 127.0.0.1 8000   # this machine only
 
-It responds to POST /act with a chunk of actions and to any other request with an empty response, which is all a ping
-needs. docs/quickstart.md walks through it with examples/quickstart_robot.py.
+serve() answers POST /act with what `policy_user` returns, and GET /ping at once; it runs `policy_user` on
+`example_user` before it says it is ready. docs/quickstart.md walks through it with examples/quickstart_robot.py.
 """
 import sys
-import time
 
 import numpy as np
-import uvicorn
 
-from sequence_ai.network import compressed, msgpack_io
-from sequence_ai.network.one_write import WholeResponse, one_write_http
+import sequence_ai
 
 
-def policy(observation: dict) -> np.ndarray:
+def policy_user(observation_user: dict) -> dict:
     """Your model here: an observation in, a chunk of actions out. This one returns 8 actions of 7 numbers."""
-    return np.full((8, 7), float(observation["image"].mean()), dtype=np.float32)
+    return {"actions": np.full((8, 7), float(observation_user["image"].mean()), dtype=np.float32)}
 
 
-async def app(scope, receive, send) -> None:
-    body = b""
-    while True:
-        message = await receive()
-        body += message.get("body", b"")
-        if not message.get("more_body"):
-            break
-    response, took_ms = b"", 0.0
-    if scope["path"] == "/act":
-        # msgpack in, arrays as arrays; whatever the robot compressed is decompressed, byte for byte
-        observation, _ = compressed.expand(msgpack_io.unpack(body), limit=64 << 20)
-        started = time.perf_counter()
-        actions = policy(observation)
-        took_ms = (time.perf_counter() - started) * 1000
-        response = msgpack_io.pack({"actions": actions})
-    await send({"type": "http.response.start", "status": 200,
-                "headers": [(b"content-type", msgpack_io.MEDIA_TYPE.encode()),
-                            (b"content-length", str(len(response)).encode()),
-                            (b"server-timing", f"act;dur={took_ms:.1f}".encode())]})
-    await send({"type": "http.response.body", "body": response})
-
+# an observation as your robot sends it: serve() runs the policy on it before it says it is ready
+example_user = {"image": np.zeros((224, 224, 3), dtype=np.uint8), "state": np.zeros(7, dtype=np.float32)}
 
 if __name__ == "__main__":
-    host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-    port = int(sys.argv[2]) if len(sys.argv) > 2 else 8000
-    # what sends each response in one write: WholeResponse around the app, one_write_http() as the protocol
-    uvicorn.run(WholeResponse(app), host=host, port=port, lifespan="off", http=one_write_http())
+    host_user = sys.argv[1] if len(sys.argv) > 1 else None
+    port_user = int(sys.argv[2]) if len(sys.argv) > 2 else 8000
+    sequence_ai.serve(policy_user, host=host_user, port=port_user, example=example_user)

@@ -13,7 +13,7 @@ serves the policy for `act()`; eval scores it. Neither gates the other, and eval
 deployment **you own**.
 
 > This file is the authoritative reference for the benchmark/eval surface. The inference/control-loop
-> half of the SDK (`sequence_ai.connect` / `act` / `run`) is documented in `README.md`.
+> half of the platform's client (`sequence_ai.connect` / `act` / `run`) is documented in `README.md`.
 
 ---
 

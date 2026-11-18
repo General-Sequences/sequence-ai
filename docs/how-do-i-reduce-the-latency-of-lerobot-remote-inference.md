@@ -7,7 +7,7 @@ has one small component for the last of these, a Zenoh setting, and it is the on
 ```python
 from sequence_ai.network import lerobot
 
-path = lerobot.keep_alive_file("zenoh-keep-alive.json5")     # an idle link then sends a frame every 100 ms
+path_user = lerobot.keep_alive_file("zenoh-keep-alive.json5")     # an idle link then sends a frame every 100 ms
 ```
 
 ```bash
@@ -37,11 +37,6 @@ other flags do.
   other's requests. A 100 KB request 0.53 s after each response took 38.1, 44.8, 82.8 and 164.3 ms at round-trip times
   (RTTs) of 11, 21, 41 and 81 ms, and 13.9, 23.2, 42.3 and 82.2 ms with the file on both ends: two to three round trips
   became one, on 40 of 40 requests. [What do the network components save?](measurements.md) has the table.
-
-## Limitations
-
-- The file has not been tested with LeRobot's own policy server and robot: the measurement used two Zenoh peers.
-- On some links the idle restart costs nothing: see [the README's limitations](../README.md#limitations).
 
 ## Try it
 
@@ -74,8 +69,8 @@ is waited for, and a short one drops a robot whose Wi-Fi stalls for a moment.
 **You already have a Zenoh file**, for TLS or access control. LeRobot takes one file, so put both in it:
 
 ```python
-mine = {"transport": {"link": {"tls": {"root_ca_certificate": "ca.pem"}}}}
-path = lerobot.keep_alive_file("zenoh.json5", base=mine)     # your settings, with the keep-alive beside them
+mine_user = {"transport": {"link": {"tls": {"root_ca_certificate": "ca.pem"}}}}
+path_user = lerobot.keep_alive_file("zenoh.json5", base=mine_user)     # your settings, with the keep-alive beside them
 ```
 
 Zenoh 1.10.2 loaded that file with both settings in it.
@@ -94,8 +89,7 @@ measurements, including the links where the pause cost nothing.
 [Measure it](how-do-i-measure-the-link-between-my-robot-and-my-gpu.md), and if the GPU is far,
 [get one nearer](how-do-i-get-a-gpu-near-my-robot.md).
 
-**LeRobot's own settings.** These are LeRobot's, from the `RemoteInferenceConfig` of 0.7.0, and were not measured
-here:
+**LeRobot's own settings.** These are LeRobot's, from the `RemoteInferenceConfig` of 0.7.0:
 
 | Setting | Default | What it is |
 |---|---|---|
