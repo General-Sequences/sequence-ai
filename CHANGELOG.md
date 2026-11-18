@@ -3,6 +3,23 @@
 What changed in each release of `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
+## 0.63.1 — 2026-11-18
+
+A robot whose address changes while it runs is let back into its GPU by itself, and on a line whose round trip
+varies, fewer acts wait for a ping.
+
+### Added
+
+- `network.connect(url, on_unreachable=fn)` calls `fn(link)` when an act cannot reach its server, and sends the act
+  once more if it returns True.
+- With `follow=`, a line that cannot reach its GPU because its address changed is let in again, and the act is sent
+  once more.
+
+### Fixed
+
+- On a line whose round trip varies, a ping is left out if its answer could still be coming when the next act
+  is due.
+
 ## 0.63.0 — 2026-11-18
 
 `sequence_ai.serve(policy)` serves a model in one call with the defaults on at both ends, and
@@ -805,8 +822,8 @@ A robot's acts and observations share one connection, a policy can run in a regi
 ### Added
 
 - `@seq.policy(region=...)` and `seq deploy --region`: `us-west` or `us-east` starts a policy's workers in that
-  region alone, a robot waiting while no card there is free; `auto`, the default, starts each robot's worker in the
-  region nearest it.
+  region alone, a robot waiting while no card there is free; `auto`, the default, starts each robot's worker on the
+  closest GPU available.
 
 ### Changed
 

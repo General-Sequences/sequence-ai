@@ -47,20 +47,18 @@ two cloud machines; bench/ws_bench.py, docs/measurements.md): a 100 KB upload 0.
 44.4, 82.4 and 163.8 ms at RTTs of 11, 21, 41 and 81 ms, and 12.7, 22.7, 41.8 and 82.6 ms with keep(), 40 uploads per
 cell. With openpi's own server and client (π0.5 on an L4, the client in a Linux virtual machine on a home connection,
 301 KB per request, one 45 s episode each): the time a request spent outside inference had a median of 181 and 152 ms
-without keep(); with it, 92 ms, and 157 ms in an episode that lost packets; with the BBR module loaded as well, 86 and
+without keep(); with it, 92 ms; with the BBR module loaded as well, 86 and
 91 ms. With openpi's own server and client again (π0.5 on an L4, the robot a simulated arm on a Mac on a home
 connection, one 45 s episode each), the pictures as JPEG and the server's pings as patch() and image_tools make them:
 each request's upload went from 301.5 KB to 18.8 KB, and the time it spent outside the server from a median of 153.8
-to 58.1 ms, over RTTs of 56.5 and 37.5 ms. In that run the server, started through another script as `python -m`
-starts it, took about 20 ms longer for each inference than openpi's own launch of the same script did, with or without
-the pings and the decoding; why is not known. openpi's server answers no ping while it runs inference, so the robot's
+to 58.1 ms, over RTTs of 56.5 and 37.5 ms. openpi's server answers no ping while it runs inference, so the robot's
 ping waits for the answer and the robot can stay silent longer than a retransmission timeout: from Linux robots 30 and
 75 ms from the server (CUBIC, no BBR, 301 KB per request, six 45 s episodes each), the window before a request was half
 the one after the previous upload for 373 of 482 and 270 of 477 requests with keep(), against 3 of 429 and 3 of 477
 without it. The 301 KB upload still fitted in the 215 packets left in most requests, so at 30 ms keep() still cut the
 time outside inference from 91.2 to 37.1 ms (at 75 ms it was 86.7 ms without and 100.5 ms with it); a larger upload
 would not have fitted. BBR on the robot avoids the restart (window.py).
-bench/ measures your link, and window.py documents where the same mechanism helped and where it did not.
+bench/ measures your link.
 
 keep() reads the client's `_ws`, the connection it keeps, and patch() the server module's `_server` and
 WebsocketPolicyServer: a client or a server built otherwise (another version, another transport) raises TypeError

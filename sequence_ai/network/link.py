@@ -68,7 +68,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from typing import Any, NamedTuple, Optional
+from typing import Any, Callable, NamedTuple, Optional
 
 from . import _warn
 from . import compress as _compress
@@ -102,6 +102,11 @@ YIELD_MIN_GAPS = 3
 RTO_FLOOR_S = 0.2
 FIRST_TRIP_S = 0.1
 RECHECK_S = 0.01               # how close to that silence's end a ping left out is asked about again
+# when a ping now would be back (_yields_now): the YIELD_TRIP_Q quantile of the last YIELD_TRIPS pings' round trips,
+# not their median - on a line whose round trips jitter (a home network out cellular: p50 52 ms, p90 128, p99 253) the
+# median of the last 8 fell short of the next by 40 ms or more one time in five, and the ping it let go met the act
+YIELD_TRIP_Q = 0.9
+YIELD_TRIPS = 32
 
 
 class Packed(NamedTuple):
@@ -139,7 +144,7 @@ class Link:
                  compress: Optional[bool] = None,
                  jpeg: Optional[bool] = None, timeout: float = 10.0, first_timeout: float = FIRST_TIMEOUT_S,
                  token: Optional[str] = None, headers: Optional[dict] = None, check: bool = True,
-                 bind: Optional[str] = None) -> None:
+                 bind: Optional[str] = None, on_unreachable: Optional[Callable[["Link"], bool]] = None) -> None:
         try:
             import httpx
         except ImportError as missing:
@@ -167,18 +172,21 @@ class Link:
         self._squeeze: Optional[_compress.Squeeze] = _compress.Squeeze() if compress is True else None
         self._squeeze_for: Optional[frozenset] = None    # the codecs an automatic Squeeze was made for
         self._answered = False               # whether an act was answered: the first waits first_timeout
-        self._stats = LatencyStats(counters=["acts", "pings", "pings_yielded", "acts_behind_ping", "pictures"],
+        self._stats = LatencyStats(counters=["acts", "pings", "pings_yielded", "acts_behind_ping", "pictures",
+                                             "unreachable_retries"],
                                    latencies=["act_us", "ping_wait_us", "pack_us"])
         self._warm = window.Warm(self._ping, every_s=ping_every_s, for_s=ping_for_s) if ping_path else None
         # pings that yield to the robot's next act (_yields_now): when its last acts were sent, its last pings' round
         # trips, and when anything was last sent on the connection
+        # called with this link when a request cannot reach the server (_unreachable): True, and the act goes once more
+        self._on_unreachable = on_unreachable
         self._yield = ping_yield
         # whether a pause restarts this connection's window: Linux with net.ipv4.tcp_slow_start_after_idle 1 and no BBR
         # (macOS keeps it, BBR skips the restart) - only then can a ping keep what a pause would take
         self._window_at_stake = window.restarts_after_idle() and window.bbr_options() is None
         self._timing = threading.Lock()
         self._act_starts: deque = deque(maxlen=YIELD_ACTS + 1)
-        self._ping_trips: deque = deque(maxlen=8)
+        self._ping_trips: deque = deque(maxlen=YIELD_TRIPS)
         self._last_send: Optional[float] = None
         self._observed: Any = Link._NONE
         # the last act answered: the time its server says its model took (Server-Timing; None where it says none), and
@@ -314,10 +322,11 @@ class Link:
         gaps = sorted(b - a for a, b in zip(starts, starts[1:]))
         gap = gaps[len(gaps) // 2]
         trip = trips[len(trips) // 2] if trips else FIRST_TRIP_S
+        back = trips[min(len(trips) - 1, int(YIELD_TRIP_Q * len(trips)))] if trips else FIRST_TRIP_S
         now = time.perf_counter()
         due = starts[-1] + gap                                   # when the next act is expected
         late = due + 0.1 * gap                                   # past this, it is late: pings as usual
-        if now + trip <= due - 0.05 * gap or now >= late:
+        if now + back <= due - 0.05 * gap or now >= late:
             return False                                         # back before the act, or the act is late
         deadline = last + trip + RTO_FLOOR_S                     # the latest the connection's next send may go
         if self._window_at_stake and now + RECHECK_S < deadline:
@@ -346,8 +355,13 @@ class Link:
             try:
                 with self._busy:
                     response = self._client.get(self._ping_path, timeout=max(0.001, min(self._timeout, left)))
-            except (self._httpx.TransportError, self._httpx.TimeoutException):
+            except (self._httpx.TransportError, self._httpx.TimeoutException) as failed:
                 response = None                          # not listening yet, or not answering: asked again
+                if isinstance(failed, (self._refused, self._httpx.ConnectTimeout)) and self._on_unreachable:
+                    try:
+                        self._on_unreachable(self)       # once this round: what it changes, the next round finds
+                    except Exception:  # noqa: BLE001 - the wait goes on, and says what it last met
+                        pass
             if response is not None:
                 last = response.status_code
                 self._learn(response)
@@ -435,6 +449,20 @@ class Link:
         waits = max(self._timeout, self._first_timeout) if first else self._timeout
         timeout = self._httpx.Timeout(self._timeout, read=waits) if first else self._timeout
         queued_us, queued = now_us(), time.perf_counter()
+        response, started, took = self._post_once(path, body, timeout, sent, queued, waits)
+        if response is None:                     # unreachable, and on_unreachable said to go once more
+            response, started, took = self._post_once(path, body, timeout, sent, queued, waits, again=True)
+        if started - queued > 0.0005:            # it waited for a ping in flight on the connection
+            self._stats.count("acts_behind_ping")
+            self._stats.sample("ping_wait_us", (started - queued) * 1e6)
+        return self._answered_with(response, body, pictures, squeeze, took, queued_us, note)
+
+    def _post_once(self, path: Optional[str], body: bytes, timeout: Any, sent: dict, queued: float, waits: float, *,
+                   again: bool = False) -> "tuple[Any, float, float]":
+        """The act's request, sent once: (its response, when it was sent, how long it took) - the response None when it
+        could not reach the server and on_unreachable (not called yet for this act: `again` False) answered True. Every
+        other failure raises, as act() says."""
+        unreached: Optional[BaseException] = None
         with self._busy:
             started = time.perf_counter()
             self._act_sent(queued, started)
@@ -450,16 +478,35 @@ class Link:
                     "wait_until_ready(example=observation), or give connect() a longer first_timeout= (now "
                     f"{self._first_timeout:g} s) or timeout= (now {self._timeout:g} s)",
                     request=getattr(late, "_request", None)) from late
-            except self._refused as refused:
+            except (self._refused, self._httpx.ConnectTimeout) as failed:
+                unreached = failed
+            took = time.perf_counter() - started
+        if unreached is not None:
+            if not again and self._unreachable(unreached):
+                self._stats.count("unreachable_retries")
+                return None, started, took
+            if isinstance(unreached, self._refused):
                 # the same error, with what to check: the operating system's message alone names no address
                 raise self._refused(
-                    f"{refused}: no response from {self._url}. Is the policy server running there, listening on "
+                    f"{unreached}: no response from {self._url}. Is the policy server running there, listening on "
                     "an address this machine can reach (0.0.0.0, not 127.0.0.1, for another machine), on that port?",
-                    request=getattr(refused, "_request", None)) from refused
-            took = time.perf_counter() - started
-        if started - queued > 0.0005:            # it waited for a ping in flight on the connection
-            self._stats.count("acts_behind_ping")
-            self._stats.sample("ping_wait_us", (started - queued) * 1e6)
+                    request=getattr(unreached, "_request", None)) from unreached
+            raise unreached
+        return response, started, took
+
+    def _unreachable(self, failed: BaseException) -> bool:
+        """on_unreachable's word on a request that could not reach the server (`failed`): True to send it once more.
+        False with none given; the callback's own error raises `failed`, with the callback's as its cause."""
+        if self._on_unreachable is None:
+            return False
+        try:
+            return bool(self._on_unreachable(self))
+        except Exception as e:  # noqa: BLE001 - the robot meets its request's own error, the callback's beneath it
+            raise failed from e
+
+    def _answered_with(self, response: Any, body: bytes, pictures: int, squeeze: Any, took: float, queued_us: int,
+                       note: bool) -> Any:
+        """The act's answer, from its response: what the response says learned, its times kept, its body read."""
         if self._warm is not None:
             self._warm.used()                # idle time counts from the response: no ping for `ping_every_s` after it
         self._learn(response)
@@ -510,7 +557,8 @@ class Link:
 def connect(url: str, *, lines: Optional[Any] = None, **options: Any) -> Any:
     """A Link to the server at `url` (Link's options: act_path, ping_path, ping_every_s, ping_for_s, ping_yield,
     compress, jpeg, timeout, first_timeout, token, headers, check, bind - the network interface it leaves by,
-    network.bind). With
+    network.bind -, on_unreachable - called with the link when an act cannot reach the server: True, and the act goes
+    once more). With
     `lines` - network interfaces (["eth0", "wwan0"]), or {interface: address} where the server has another address by
     each - a network.lines.Lines: a connection by each, every act sent on each, the first answer used."""
     if lines is not None:

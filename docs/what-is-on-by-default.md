@@ -37,7 +37,7 @@ link_user = sequence_ai.connect("http://YOUR_GPU:8000")            # on the robo
 | Compression | Large arrays are compressed where that saves upload time, while the server says it reads zstd or zlib | `compress=False` |
 | The first wait | The first act waits up to 120 s for its response, the others 10 s | `first_timeout=10.0` |
 | Pings when idle | A small GET on the same connection after each 100 ms of idle time, for up to a minute | `ping_path=None` |
-| Pings out of an act's way | Once the robot's acts come at a steady spacing, a ping whose answer would still be on its way when the next act is due is not sent. On Linux without BBR, where a pause restarts the window, the one ping that alone keeps it (the connection's silence still under a round trip and 200 ms) is sent all the same; `stats()` counts the others as `pings_yielded` | `ping_yield=False` |
+| Pings out of an act's way | Once the robot's acts come at a steady spacing, a ping whose answer might still be on its way when the next act is due - judged by the slowest tenth of the last 32 pings' round trips - is not sent. On Linux without BBR, where a pause restarts the window, the one ping that alone keeps it (the connection's silence still under a round trip and 200 ms) is sent all the same; `stats()` counts the others as `pings_yielded` | `ping_yield=False` |
 | One connection | Every request and ping on one kept connection, never two at once | always on |
 | BBR and TCP keepalive | Requested on the connection's socket, where the machine allows them | always on |
 | Machine checks | One warning when Wi-Fi power saving is on (on macOS, which gives nothing to read it from, when the requests go over Wi-Fi), and one when the machine restarts its window after a pause | `check=False` |
@@ -90,7 +90,9 @@ server that hands out no example. It exits 0 when no line says `no`.
   A ping has a cost too: the connection carries one request at a time, so an act that starts while a ping is on its
   way waits for its answer, a round trip at most (`acts_behind_ping` and `ping_wait_us` in `stats()`). On a line with
   a 48 ms round trip to an L4 running π0.5, 27 of 88 acts did, 26.8 ms at the median. So a ping that would meet the
-  robot's next act is left out: the next act is expected the median gap between the last acts after the last one, and
+  robot's next act is left out: the next act is expected the median gap between the last acts after the last one, a
+  ping's answer by the slowest tenth of the last 32 pings' round trips - on a line out cellular, whose round trips run
+  52 ms at the median and 128 ms at the 90th percentile, the median let one ping in twenty go that met the act - and
   should it not come by a tenth of that gap late, the ping goes then. One ping is sent all the same, on Linux without
   BBR: the one that alone keeps the window, while the connection's silence is still under a round trip and 200 ms,
   Linux's least retransmission timeout. Once a long inference has spent that silence, the next send restarts the window

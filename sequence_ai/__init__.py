@@ -442,6 +442,9 @@ def _own_server(url: str, more: tuple, timeout_s: float | None, token: str | Non
 
     options = {key: value for key, value in (("timeout", timeout_s), ("jpeg", jpeg), ("compress", compress),
                                              ("first_timeout", first_timeout)) if value is not None}
+    if follow:
+
+        options["on_unreachable"] = _Refollow(follow, url, base_url, lines)
     return _link.connect(url, token=token, lines=lines, **options)
 
 
@@ -470,6 +473,40 @@ def _followed(token: str, url: str, base_url: str | None, lines: list[str] | dic
                  f"keeps one address a robot, so {', '.join(left)} {'reaches' if len(left) == 1 else 'reach'} the "
                  "GPU only from an address on its allow list (seq gpu allow)")
             return
+
+
+REFOLLOW_EVERY_S = 30.0
+
+
+class _Refollow:
+    """connect()'s `on_unreachable` for a robot with a follow token (sequence_ai.network.link.Link): the line whose link
+    could not reach the GPU - `link.bind`, None for a robot's one - follows again (_follow_line), and its act is asked
+    once more where the GPU says it applied the list that follow made: the robot's address moved (a prefix renumbered,
+    a cellular line's address changed), or its entry was lost (a machine's rules started over) - one follow puts either
+    right. False, and the link's own error stands, where the follow could not be done, and for a line that followed
+    within REFOLLOW_EVERY_S: a server that is down, its list right all along, costs the platform one follow and the
+    robot one ask more each REFOLLOW_EVERY_S, no more. Never raises.
+"""
+
+    def __init__(self, token: str, url: str, base_url: str | None, lines) -> None:
+        import threading
+
+        self._token, self._url, self._base_url = token, url, base_url
+        self._to = dict(lines) if isinstance(lines, dict) else {}
+        self._at: dict = {}
+        self._lock = threading.Lock()
+
+    def __call__(self, link: Any) -> bool:
+        import time
+
+        line = getattr(link, "bind", None)
+        now = time.monotonic()
+        with self._lock:
+            if now - self._at.get(line, float("-inf")) < REFOLLOW_EVERY_S:
+                return False
+            self._at[line] = now
+        out = _follow_line(self._token, self._to.get(line) or self._url, self._base_url, line, now + FOLLOW_WAIT_S)
+        return out is not None and bool(out.get("applied"))
 
 
 def _follow_line(token: str, to: str, base_url: str | None, line: str | None, until: float) -> dict | None:
