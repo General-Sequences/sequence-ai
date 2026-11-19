@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/banner-dark.png">
-    <img alt="sequence-ai" src="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/banner-light.png" width="720">
+    <img alt="SequenceLink" src="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/banner-light.png" width="720">
   </picture>
 </p>
 
@@ -12,16 +12,16 @@
   <a href="https://github.com/General-Sequences/sequence-ai/blob/main/LICENSE"><img alt="license: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-15775C?style=flat-square"></a>
 </p>
 
-`sequence-ai` is an open-source framework for serving robot policies from remote GPUs over wide-area networks (WANs). It
-is used with openpi, LeRobot, GR00T and Octo policies, and with any policy given as a function. It runs on your own
-GPU, or on one rented from [General Sequences](https://generalsequences.com) near your robot: on the robot, only what
-`connect()` is given changes.
+SequenceLink is an open-source framework for serving robot policies from remote GPUs over wide-area networks (WANs); its
+package is `sequence-ai`. It is used with openpi, LeRobot, GR00T and Octo policies, and with any policy given as a function. It runs on your own
+GPU, or on one rented from [General Sequences](https://generalsequences.com) near your robot, where SequenceLink is also
+the hosted platform: on the robot, only what `connect()` is given changes.
 
 Give it a policy server and a robot. On the GPU, it replays the module a model calls many times per inference from CUDA
 graphs, with exactly the same outputs, and batches several robots' requests within the slack their action chunks
 leave. On the connection, it keeps the TCP congestion window open across the robot's pauses, so a 24 KB upload after
-a pause takes one round trip where it took two, at RTTs from 12 to 101 ms. Together these are GS-WAN (General Sequences
-Wide-Area Network). Each component is one file that can be added to existing code.
+a pause takes one round trip where it took two, at RTTs from 12 to 101 ms. Together these are
+SequenceLink. Each component is one file that can be added to existing code.
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
@@ -171,7 +171,7 @@ Sequences, reached with this package's `seq gpu` commands. [Three ways to run it
 
 | Component | What it does | To add it | Requires |
 |---|---|---|---|
-| [`serve`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/serve.py) | Serves a policy, given as a function or a batch function, to robots elsewhere: on a thread of its own, pings answered at once, a warm-up, pictures and compressed arrays restored. `openpi.batched(policy)` makes an openpi policy a batch function. | one call | what sequence-ai installs |
+| [`serve`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/serve.py) | Serves a policy, given as a function or a batch function, to robots elsewhere: on a thread of its own, pings answered at once, a warm-up, pictures and compressed arrays restored. `openpi.batched(policy)` makes an openpi policy a batch function. | one call | what `pip install sequence-ai` installs |
 | [`cuda_graphs`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/cuda_graphs.py) | Replays a torch module that your model calls many times per run from CUDA graphs captured from its own eager kernels. A graph is kept only when its output is exactly the same. | one call | torch 2.4 or later, a CUDA GPU |
 | [`batcher`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/batcher.py) | Batches the calls waiting for a model into one call, in the batch sizes the model lists. | one object, one `await` | nothing |
 | [`replicas`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/replicas.py) | Runs replicas of a model, each in its own process on the GPU assigned to it, and replaces one that dies. | one object, one `await` | nothing |
@@ -378,11 +378,11 @@ Issues and pull requests are welcome: see [CONTRIBUTING.md](https://github.com/G
 
 ## Cite
 
-If you use `sequence-ai` in research, please cite it:
+If you use SequenceLink in research, please cite it:
 
 ```bibtex
 @software{generalsequences2026sequenceai,
-  title  = {sequence-ai},
+  title  = {SequenceLink},
   author = {{General Sequences}},
   year   = {2026},
   url    = {https://github.com/General-Sequences/sequence-ai}

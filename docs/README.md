@@ -1,6 +1,6 @@
-# sequence-ai documentation
+# SequenceLink documentation
 
-`sequence-ai` is an open-source framework for serving robot policies from remote GPUs over wide-area networks: on the
+SequenceLink is an open-source framework for serving robot policies from remote GPUs over wide-area networks: on the
 GPU, `sequence_ai.serve(policy)`; on the robot, `sequence_ai.connect(address)`. Its inference layer
 (`sequence_ai.engine`) and network layer (`sequence_ai.network`) also work in a policy server of your own. The same
 package is the client of General Sequences' GPUs and hosted deployments (`seq`, `sequence_ai.gpu`). Each page here

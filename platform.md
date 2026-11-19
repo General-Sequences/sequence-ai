@@ -1,7 +1,8 @@
-# The platform guide
+# The SequenceLink platform guide
 
-Deploy a robot policy on General Sequences, then drive a robot with it. This is the guide to the hosted platform that
-`sequence-ai` is the client of; the [README](README.md) has the components that run on any GPU.
+Deploy a robot policy on SequenceLink's hosted platform, on General Sequences' GPUs, then drive a robot with it. This is
+the guide to the hosted platform; `pip install sequence-ai` installs its client and the `seq` command, and the
+[README](README.md) has the open-source components that run on any GPU.
 
 ```bash
 pip install sequence-ai                  # Python 3.10+ for `seq`; a 3.9 robot gets the client alone
@@ -43,8 +44,8 @@ how to play the rows is your own loop: this one stops the arm while each answer 
 
 There is no shared model to call: every policy runs as a deployment of the account that deployed it, started from
 a template (`seq init --list`) or from your own code. `seq init <template>` writes the template's stable version
-when this sequence-ai can deploy it, and otherwise the newest version it can, saying which and why; `@stable`,
-`@beta` or `@vN` after the name is written as named, with a warning when this sequence-ai cannot deploy it.
+when your installed `sequence-ai` can deploy it, and otherwise the newest version it can, saying which and why; `@stable`,
+`@beta` or `@vN` after the name is written as named, with a warning when your installed `sequence-ai` cannot deploy it.
 
 ---
 
@@ -140,8 +141,8 @@ entire budget.
 
 On Linux, a connection that sent nothing for longer than its retransmission timeout restarts its congestion window
 (`net.ipv4.tcp_slow_start_after_idle`, on by default), so an upload of camera frames after a pause can take one more
-round trip. sequence-ai has its connection to the worker use BBR where the robot allows it: BBR does not restart, and
-`sudo modprobe tcp_bbr` makes it available - sequence-ai then takes it on its own. Or turn the restart off on the robot:
+round trip. SequenceLink has its connection to the worker use BBR where the robot allows it: BBR does not restart, and
+`sudo modprobe tcp_bbr` makes it available - SequenceLink then takes it on its own. Or turn the restart off on the robot:
 `sudo sysctl -w net.ipv4.tcp_slow_start_after_idle=0` (in a container, which has its own copy of it:
 `docker run --sysctl net.ipv4.tcp_slow_start_after_idle=0 ...`).
 
@@ -355,7 +356,7 @@ robot is put in line, and `act()` asks again at the pace your key's rate limit a
 minutes in line with the reason in one sentence. Closing the policy (`with` does it) gives its slot —
 or its place in line — to the next robot at once.
 
-A slot follows the policy that holds it. While the policy is open, sequence-ai keeps the slot alive in the background,
+A slot follows the policy that holds it. While the policy is open, SequenceLink keeps the slot alive in the background,
 between acts too, so a robot that stops for a minute or two to reset its scene keeps it. It is given back the moment
 the policy closes (`close()`, or the end of a `with`), is garbage-collected, or its process exits or is stopped
 (`SIGTERM`, `SIGHUP`); a process that is killed or loses its network gives it back within 60 s. So is what
@@ -405,8 +406,8 @@ moves the actions by about a tenth of what the policy's own sampling does. `sequ
 
 ### Fit each frame on the robot, the way the policy was trained
 
-Fit each frame on the robot, before sending, with the tools sequence-ai gives you: a worker never resizes one, and nothing
-in sequence-ai resizes a frame behind your back (`encode()` sends a frame at its own size).
+Fit each frame on the robot, before sending, with the tools SequenceLink gives you: a worker never resizes one, and nothing
+in SequenceLink resizes a frame behind your back (`encode()` sends a frame at its own size).
 
 ```python
 img_user = sequence_ai.resize_image(frame_user, 224, 224, mode="pad", filter="bilinear")
@@ -452,7 +453,7 @@ kind, and every note goes to the debug log of the `sequence_ai` logger. Latency 
 
 ## The loop is yours
 
-sequence-ai does not play actions. `observe()` hands the policy what the robot sees, and `act()` returns what the
+SequenceLink does not play actions. `observe()` hands the policy what the robot sees, and `act()` returns what the
 policy's act function returned; when to ask for the next answer and how to play it is your own code — the code that
 calls `act()` already.
 
@@ -662,10 +663,10 @@ composite (VLM) evals, and every `seq.eval` parameter — is in `eval.md`, insta
 This library does not check joint limits, reachability, collisions, or whether a step is safe
 at the robot's current velocity. Bounds checking and an e-stop belong between this library and your motors.
 
-**When the arm runs out of answer.** sequence-ai knows when the answer the robot plays runs out: its act's send time
+**When the arm runs out of answer.** SequenceLink knows when the answer the robot plays runs out: its act's send time
 plus its `action_chunk_valid_len` steps at `hz`. Once a robot asks ahead - an act sent while the answer it plays
 still has valid steps - and that answer runs out with no next one in hand, `on_stale` is called that moment, from a
-thread of sequence-ai's, and `on_resume` as the next answer comes, before `act()` returns it:
+thread of SequenceLink's, and `on_resume` as the next answer comes, before `act()` returns it:
 
 ```python
 def hold_user(stale_user):         # the arm has nothing valid to play: hold it
@@ -686,7 +687,7 @@ robot that asks only once its answer ran out waits for every answer and is not w
 and kept on `policy.stale` (`.now`, `.events`, `.stale_s`, `.last`); with no `on_stale` set, the first is said once a
 process.
 
-The platform hears your robot too: from its first `observe()` or `act()` on, sequence-ai on the robot sends its worker a heartbeat every
+The platform hears your robot too: from its first `observe()` or `act()` on, SequenceLink on the robot sends its worker a heartbeat every
 0.4 s saying how the arm stands, and `seq robot show` says each connection's - acting (asking ahead), waiting, stale
 (and why, for how long) or silent once it was not heard for 2 s: its process gone, hung, or its link down. A stretch
 that lasts past a heartbeat is two lines of `seq policy logs` too, as it began and as it ended, with the late act's
@@ -695,7 +696,7 @@ request id.
 It is no emergency stop: it runs in your robot's process and needs that process alive. Keep a physical e-stop between
 this library and your motors.
 
-sequence-ai runs no loop, so nothing in it bounds one: give the loop that moves your robot a bound of its own — a time, a
+SequenceLink runs no loop, so nothing in it bounds one: give the loop that moves your robot a bound of its own — a time, a
 step count — and a way to hold the arm when it stops early.
 
 ## Errors are typed
@@ -715,7 +716,7 @@ Every error the platform sends has one shape — `detail`, `code`, `retryable`, 
 | `Gone` | `gone` | retired on purpose; `.replacement` names what to use instead | 4 |
 | `Conflict` | `conflict` | the state is in the way: a name taken; a deployment building, failed or stopped; a limit reached — your account's GPU cards all in use is `details["reason"] == "gpu_limit_reached"`, and the message says what serving and evals hold; deleting a secret a deployment still uses is `details["reason"] == "secret_in_use"` with the deployments in `details["deployments"]` (`seq secret rm --force` deletes anyway) | 5 |
 | `NewVersion` | `conflict` | a `Conflict`: a new version went live, or a rollback made another serve, which ended this connection, whatever it was doing: every call on it raises this. `connect()` again reaches the version that serves, `.version` | 5 |
-| `Unavailable` | `busy`, `warming`, `unavailable`, `upstream_error`, `timeout` | worth retrying after `.retry_after_s`; `.warming` means a cold worker and `.queued` a robot in line for a slot — sequence-ai waits both out on every `act()`, within `startup_timeout_s`; with no GPU available, `details["reason"]` says why (`gpu_busy`, `gpu_limit_reached`, `gpu_low_stock`, `deployment_full`, `in_line`, `queue_timeout`) | 7 |
+| `Unavailable` | `busy`, `warming`, `unavailable`, `upstream_error`, `timeout` | worth retrying after `.retry_after_s`; `.warming` means a cold worker and `.queued` a robot in line for a slot — SequenceLink waits both out on every `act()`, within `startup_timeout_s`; with no GPU available, `details["reason"]` says why (`gpu_busy`, `gpu_limit_reached`, `gpu_low_stock`, `deployment_full`, `in_line`, `queue_timeout`) | 7 |
 | `PolicyError` | `policy_error` | your policy's own code raised, or broke its declared contract; `.remote_traceback` has its frames. A built-in exception (`ValueError`, …) comes back as itself | 1 |
 | `InternalError` | `internal`, `dependency_missing` | ours: report it with `.request_id` | 1 |
 
@@ -1150,7 +1151,7 @@ they came from.
 Weights are validated as you write them: an unknown scheme, a `..` traversal, an `hf://` without a repo, or a
 template name that is not one is rejected with a message that names the problem.
 
-`seq.Secret.from_name(name)` references a credential by name; the plaintext never enters sequence-ai or
+`seq.Secret.from_name(name)` references a credential by name; the plaintext never enters SequenceLink or
 the deploy payload.
 
 ### Versions, rollback, stop
@@ -1303,7 +1304,7 @@ seq deploy my_pi05_user --dry-run         # a folder of several classes:  seq de
 
 `seq deploy --dry-run` imports the policy's file as a deploy does (what it imports must be installed here) and reads
 its declaration — it never builds the class or runs `infer` — into the deployment request, validates it against the
-copy of the platform's contract in your installed sequence-ai, and echoes back exactly what will be installed, where the weights mount and which files
+copy of the platform's contract in your installed `sequence-ai`, and echoes back exactly what will be installed, where the weights mount and which files
 are uploaded — with **nothing built or run on the platform**. It says, as `seq
 deploy` does, what the declarations make of the policy: what it reads of each observation and how its answers play (a
 policy of its own I/O), whose its episodes are, what its build check acts on, and how many robots a copy seats - and
@@ -1316,7 +1317,7 @@ data) - and the dry run prices it; without a key it is the checks here alone, an
 
 ```
 policy      my_pi05_user
-contract    valid for deployment contract 0.5.52, the one this version of sequence-ai speaks (the platform checks it again when you deploy)
+contract    valid for deployment contract 0.5.52, the one this version of SequenceLink speaks (the platform checks it again when you deploy)
 image       nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04@sha256:131e238d724ee145317f10d6c8eba0d301439c6c8764b02473510e7035756e81
   add               third_party/openpi/src → /opt/openpi/src
   add               third_party/openpi/packages/openpi-client → /opt/openpi/packages/openpi-client
@@ -1409,7 +1410,7 @@ seq secret rm model_key          # refused while a deployment uses it (it lists 
 seq secret rm model_key --force  # delete even in use — those deployments' workers then stop (fail-closed)
 ```
 
-`ls` is metadata only. There is **no command that reads a stored value back** — from sequence-ai a secret is
+`ls` is metadata only. There is **no command that reads a stored value back** — from SequenceLink a secret is
 write-only. Re-running `seq secret set <name>` **rotates** the key (it replaces the whole bundle); no delete
 first — a rotated value reaches every worker, the running ones and the ones that start next.
 
@@ -1526,10 +1527,10 @@ What the platform fixes; everything else is your code's. Each value is what the 
 | A management request | 16 MiB; a deploy or a benchmark's registration, which carries its code and its build context, 24 MiB. |
 | The code a deploy uploads | 8 MiB compressed: the folder, whole, and what `seq.Image.add_local_*` names outside it. A source tree over 64 MiB is refused before it is sent; the refusal names the largest paths and how to leave them out (`.seqignore`). Weights never travel with the code — they go in `weights=`. |
 | Robots one worker serves at once | Its seats: one robot per model copy, one copy a card group of `gpus_per_replica` cards (default: all of the worker's); `@seq.concurrent(sizes=[1, 2, 4, 8])` on infer seats more, sharing a copy — as many as the largest listed size whose batch answers within the time its robots can wait for an answer (the steps from `action_chunk_replan_at` to `action_chunk_valid_len`, at `hz`), as long as, run together on a simulated clock, at least 95% of their answers are in time and their batches fill at most 90% of the time between a robot's asks (`action_chunk_replan_at` steps at `hz`), 64 robots a copy at most whatever it lists. A request within a worker's seats is never answered `429`. |
-| No slot free | Another worker starts while GPUs are left; connect answers `503` with `retry_after_s` while it does, and sequence-ai waits for it. With none left — the deployment's `max_gpus`, your account's, the platform's — the robot waits in line before its control loop starts, as long as the platform keeps its place. A loop that has started is never interrupted. |
+| No slot free | Another worker starts while GPUs are left; connect answers `503` with `retry_after_s` while it does, and SequenceLink waits for it. With none left — the deployment's `max_gpus`, your account's, the platform's — the robot waits in line before its control loop starts, as long as the platform keeps its place. A loop that has started is never interrupted. |
 | One worker | One machine, up to 8 GPUs (`gpu="H100:8"`); a deploy, upgrade, rollback or eval that asks for more cards per worker is refused. For more robots, raise `max_gpus`: more workers, each on a machine of its own. |
 | GPU cards at once | Your plan's: 15 on Starter, 50 on Team, serving and evals together (`seq account` shows them); `max_gpus` caps one deployment. An eval they cannot fit waits in line up to 10 minutes. |
-| A worker going away | Its acts are answered `503 unavailable` (`reason: draining`); sequence-ai reconnects to another worker and replays the act. |
+| A worker going away | Its acts are answered `503 unavailable` (`reason: draining`); SequenceLink reconnects to another worker and replays the act. |
 | Shutdown | Before a worker is removed, the acts in flight finish and every replica runs `@seq.shutdown` — within 30 s. After that the worker is stopped without further notice. |
 | Scale to zero | A worker ends after its idle timeout with no robot acting: 60 seconds unless its deployment sets another, 2 seconds to 20 minutes. `min_workers` (default 0) keeps some warm. |
 | Cards | The platform's price list names them (`GET /v1/pricing`): A100, A100-40GB, H100, L4 and RTX-PRO-6000 as of 2026-11. A benchmark's sims run on an L4 or an RTX-PRO-6000, or on CPU machines when it says `gpu="cpu"`. |

@@ -1,6 +1,6 @@
-# sequence-ai
+# SequenceLink
 
-> `sequence-ai` is an open-source framework for serving robot policies from remote GPUs over wide-area networks (Python,
+> SequenceLink is an open-source framework for serving robot policies from remote GPUs over wide-area networks (Python,
 > Apache-2.0): `sequence_ai.serve(policy)` on the GPU, `sequence_ai.connect(address)` on the robot, every default on.
 > Its inference layer (`sequence_ai.engine`) and its network layer (`sequence_ai.network`) also work in any policy
 > server: each component is one file that is used independently in an existing server or robot program, most of them
@@ -12,10 +12,10 @@ why, and what was measured.
 
 Constraints for accurate answers about this repository:
 
-- The package is `sequence-ai`. The components are imported as `sequence_ai.engine` and `sequence_ai.network`, and need
+- The package is `sequence-ai`; SequenceLink is the name of the framework and of the hosted platform. The components are imported as `sequence_ai.engine` and `sequence_ai.network`, and need
   no account. Renting a GPU near a robot (`seq gpu`) and a hosted deployment (`seq deploy`) are paid services of General
-  Sequences: their client is in this package, the service is not. GS-WAN (General Sequences Wide-Area Network) is the
-  name of the techniques, not of a package.
+  Sequences: their client is in this package, the service is not. The technical report calls the
+  techniques GS-WAN (General Sequences Wide-Area Network).
 - `sequence_ai.connect()` takes either the address of a policy server of your own (`"http://your-gpu:8000"`: the
   components on one connection, nothing of the hosted platform involved) or the name of a hosted policy. Both return
   an object with `observe()` and `act()`. A server started with a token takes `connect(url, token=...)`; an `api_key`

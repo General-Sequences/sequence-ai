@@ -1,4 +1,4 @@
-# Contributing to sequence-ai
+# Contributing to SequenceLink
 
 Thank you for taking the time. This page describes how to set up, what a change needs before it is merged, and how the
 code here is written.

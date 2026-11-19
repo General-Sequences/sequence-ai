@@ -1,6 +1,6 @@
-# sequence-ai
+# SequenceLink
 
-> `sequence-ai` is an open-source framework for serving robot policies from remote GPUs over wide-area networks (Python,
+> SequenceLink is an open-source framework for serving robot policies from remote GPUs over wide-area networks (Python,
 > Apache-2.0): `sequence_ai.serve(policy)` on the GPU, `sequence_ai.connect(address)` on the robot, every default on.
 > Its inference layer (`sequence_ai.engine`) and its network layer (`sequence_ai.network`) also work in any policy
 > server: each component is one file that is used independently in an existing server or robot program, most of them
@@ -14,16 +14,16 @@ The map of the repository, file by file, is https://github.com/General-Sequences
 
 Source: https://github.com/General-Sequences/sequence-ai/blob/main/README.md
 
-`sequence-ai` is an open-source framework for serving robot policies from remote GPUs over wide-area networks (WANs). It
-is used with openpi, LeRobot, GR00T and Octo policies, and with any policy given as a function. It runs on your own
-GPU, or on one rented from [General Sequences](https://generalsequences.com) near your robot: on the robot, only what
-`connect()` is given changes.
+SequenceLink is an open-source framework for serving robot policies from remote GPUs over wide-area networks (WANs); its
+package is `sequence-ai`. It is used with openpi, LeRobot, GR00T and Octo policies, and with any policy given as a function. It runs on your own
+GPU, or on one rented from [General Sequences](https://generalsequences.com) near your robot, where SequenceLink is also
+the hosted platform: on the robot, only what `connect()` is given changes.
 
 Give it a policy server and a robot. On the GPU, it replays the module a model calls many times per inference from CUDA
 graphs, with exactly the same outputs, and batches several robots' requests within the slack their action chunks
 leave. On the connection, it keeps the TCP congestion window open across the robot's pauses, so a 24 KB upload after
-a pause takes one round trip where it took two, at RTTs from 12 to 101 ms. Together these are GS-WAN (General Sequences
-Wide-Area Network). Each component is one file that can be added to existing code.
+a pause takes one round trip where it took two, at RTTs from 12 to 101 ms. Together these are
+SequenceLink. Each component is one file that can be added to existing code.
 
 ## Install
 
@@ -155,7 +155,7 @@ Sequences, reached with this package's `seq gpu` commands. [Three ways to run it
 
 | Component | What it does | To add it | Requires |
 |---|---|---|---|
-| [`serve`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/serve.py) | Serves a policy, given as a function or a batch function, to robots elsewhere: on a thread of its own, pings answered at once, a warm-up, pictures and compressed arrays restored. `openpi.batched(policy)` makes an openpi policy a batch function. | one call | what sequence-ai installs |
+| [`serve`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/serve.py) | Serves a policy, given as a function or a batch function, to robots elsewhere: on a thread of its own, pings answered at once, a warm-up, pictures and compressed arrays restored. `openpi.batched(policy)` makes an openpi policy a batch function. | one call | what `pip install sequence-ai` installs |
 | [`cuda_graphs`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/cuda_graphs.py) | Replays a torch module that your model calls many times per run from CUDA graphs captured from its own eager kernels. A graph is kept only when its output is exactly the same. | one call | torch 2.4 or later, a CUDA GPU |
 | [`batcher`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/batcher.py) | Batches the calls waiting for a model into one call, in the batch sizes the model lists. | one object, one `await` | nothing |
 | [`replicas`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/engine/replicas.py) | Runs replicas of a model, each in its own process on the GPU assigned to it, and replaces one that dies. | one object, one `await` | nothing |
@@ -362,11 +362,11 @@ Issues and pull requests are welcome: see [CONTRIBUTING.md](https://github.com/G
 
 ## Cite
 
-If you use `sequence-ai` in research, please cite it:
+If you use SequenceLink in research, please cite it:
 
 ```bibtex
 @software{generalsequences2026sequenceai,
-  title  = {sequence-ai},
+  title  = {SequenceLink},
   author = {{General Sequences}},
   year   = {2026},
   url    = {https://github.com/General-Sequences/sequence-ai}
@@ -2047,7 +2047,7 @@ Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i
 # How do I reduce the latency of LeRobot remote inference?
 
 Start with the link, because LeRobot 0.7's remote inference already manages the robot's timing itself: put the
-policy server near the robot, measure the link, and keep the link from going idle between observations. `sequence-ai`
+policy server near the robot, measure the link, and keep the link from going idle between observations. SequenceLink
 has one small component for the last of these, a Zenoh setting, and it is the only thing here that touches LeRobot.
 
 ```python
@@ -2253,7 +2253,7 @@ Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i
 # How do I run π0 (openpi) on a remote GPU?
 
 Run openpi's own policy server on the GPU and openpi's own client on the robot, as openpi's guide describes.
-`sequence-ai` then changes the command that starts the server, and two lines on the robot: the server pings each robot
+SequenceLink then changes the command that starts the server, and two lines on the robot: the server pings each robot
 and takes its pictures as JPEG, and the robot sends them that way and keeps its connection from going idle between
 action chunks.
 
@@ -2643,7 +2643,7 @@ fewer forward passes; one robot's request is no faster for it.
 
 Keep it. `connect()` needs two things from a server: a POST that takes a msgpack body and responds with msgpack or
 JSON, and any cheap GET for its ping. To get the rest of the defaults, a server also says what it restores in an
-`X-Seq-Reads` header and restores it, and says it is a sequence-ai server in `X-Seq-Server`. In a FastAPI app:
+`X-Seq-Reads` header and restores it, and says it is a SequenceLink server in `X-Seq-Server`. In a FastAPI app:
 
 ```python
 import asyncio

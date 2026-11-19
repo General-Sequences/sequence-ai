@@ -1,4 +1,4 @@
-# Releasing sequence-ai
+# Releasing SequenceLink
 
 Versions follow [Semantic Versioning](https://semver.org). Before 1.0.0, a minor version may change an interface;
 [CHANGELOG.md](CHANGELOG.md) says so under **Changed** when one does.

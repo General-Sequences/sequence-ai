@@ -1,6 +1,6 @@
 # Third-party notices
 
-`sequence-ai` is licensed under the Apache License, Version 2.0. Parts of two of its components are adapted from another
+SequenceLink (the `sequence-ai` package) is licensed under the Apache License, Version 2.0. Parts of two of its components are adapted from another
 open-source project, and the page `seq eval replay` serves carries other projects' files unchanged. Each is named here
 with its license.
 

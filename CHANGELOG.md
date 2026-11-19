@@ -1,6 +1,6 @@
 # Changelog
 
-What changed in each release of `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
+What changed in each release of SequenceLink's package, `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
 ## 0.64.1 — 2026-11-19

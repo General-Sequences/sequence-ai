@@ -1,6 +1,6 @@
 # For coding assistants
 
-`sequence-ai` is an open-source framework for serving robot policies from remote GPUs over wide-area networks. Two parts
+SequenceLink is an open-source framework for serving robot policies from remote GPUs over wide-area networks. Two parts
 of it work with any policy server and are developed in this repository: the inference layer in `sequence_ai/engine/`
 and the network layer in `sequence_ai/network/`, independent components of one file each. A change here is almost
 always a change to one of those files. [`llms.txt`](llms.txt) maps the files; each module's docstring is its reference.

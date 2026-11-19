@@ -1,7 +1,7 @@
 # How do I reduce the latency of LeRobot remote inference?
 
 Start with the link, because LeRobot 0.7's remote inference already manages the robot's timing itself: put the
-policy server near the robot, measure the link, and keep the link from going idle between observations. `sequence-ai`
+policy server near the robot, measure the link, and keep the link from going idle between observations. SequenceLink
 has one small component for the last of these, a Zenoh setting, and it is the only thing here that touches LeRobot.
 
 ```python

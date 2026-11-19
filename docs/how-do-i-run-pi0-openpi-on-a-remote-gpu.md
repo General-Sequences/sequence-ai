@@ -1,7 +1,7 @@
 # How do I run π0 (openpi) on a remote GPU?
 
 Run openpi's own policy server on the GPU and openpi's own client on the robot, as openpi's guide describes.
-`sequence-ai` then changes the command that starts the server, and two lines on the robot: the server pings each robot
+SequenceLink then changes the command that starts the server, and two lines on the robot: the server pings each robot
 and takes its pictures as JPEG, and the robot sends them that way and keeps its connection from going idle between
 action chunks.
 

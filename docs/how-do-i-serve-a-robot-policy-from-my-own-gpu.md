@@ -112,7 +112,7 @@ fewer forward passes; one robot's request is no faster for it.
 
 Keep it. `connect()` needs two things from a server: a POST that takes a msgpack body and responds with msgpack or
 JSON, and any cheap GET for its ping. To get the rest of the defaults, a server also says what it restores in an
-`X-Seq-Reads` header and restores it, and says it is a sequence-ai server in `X-Seq-Server`. In a FastAPI app:
+`X-Seq-Reads` header and restores it, and says it is a SequenceLink server in `X-Seq-Server`. In a FastAPI app:
 
 ```python
 import asyncio

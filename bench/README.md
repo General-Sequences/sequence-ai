@@ -1,6 +1,6 @@
 # bench: measure your own link
 
-What a network component of sequence-ai saves depends on the link between your robot and your GPU. These two files measure
+What a network component of SequenceLink saves depends on the link between your robot and your GPU. These two files measure
 that link, so you add the components that help on it and leave the ones that do not.
 
 ```bash
