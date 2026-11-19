@@ -119,24 +119,6 @@ rented one. Its weights download with a General Sequences key:
 
 ## How it fits together
 
-```
-            robot                                                GPU
- ┌─────────────────────────┐                        ┌───────────────────────────┐
- │  your control loop      │                        │  your policy              │
- ├─────────────────────────┤      observation       ├───────────────────────────┤
- │  sequence_ai.network    │  ───────────────────▶  │  sequence_ai.engine       │
- │    connect · openpi     │                        │    serve · cuda_graphs    │
- │    window · compress    │          WAN           │    batcher · replicas     │
- │    frames · wifi_power  │                        │    slack                  │
- │                         │                        ├───────────────────────────┤
- │                         │  ◀───────────────────  │  sequence_ai.network      │
- │                         │      action chunk      │    one_write · ping       │
- └─────────────────────────┘                        │    tcp_link · compressed  │
-                                                    └───────────────────────────┘
-
-  both ends: msgpack_io · latency_stats             your own link, measured: bench/
-```
-
 **`sequence_ai.network`** is the connection between a robot and the GPU its policy runs on. On the robot, `connect()`
 applies the client-side components to one connection, and `openpi.keep()` does the same on the connection that openpi's
 own client holds. On the server, `one_write` and `ping` wrap a uvicorn or a WebSocket server. **`sequence_ai.engine`**

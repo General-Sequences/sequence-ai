@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/banner-dark.svg">
-    <img alt="sequence-ai" src="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/banner-light.svg" width="720">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/banner-dark.png">
+    <img alt="sequence-ai" src="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/banner-light.png" width="720">
   </picture>
 </p>
 
@@ -128,23 +128,12 @@ rented one. Its weights download with a General Sequences key:
 
 ## How it fits together
 
-```
-            robot                                                GPU
- ┌─────────────────────────┐                        ┌───────────────────────────┐
- │  your control loop      │                        │  your policy              │
- ├─────────────────────────┤      observation       ├───────────────────────────┤
- │  sequence_ai.network    │  ───────────────────▶  │  sequence_ai.engine       │
- │    connect · openpi     │                        │    serve · cuda_graphs    │
- │    window · compress    │          WAN           │    batcher · replicas     │
- │    frames · wifi_power  │                        │    slack                  │
- │                         │                        ├───────────────────────────┤
- │                         │  ◀───────────────────  │  sequence_ai.network      │
- │                         │      action chunk      │    one_write · ping       │
- └─────────────────────────┘                        │    tcp_link · compressed  │
-                                                    └───────────────────────────┘
-
-  both ends: msgpack_io · latency_stats             your own link, measured: bench/
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/architecture-dark.png">
+    <img alt="How it fits together. On the robot: your control loop over sequence_ai.network (connect, openpi, window, compress, frames, wifi_power). Across the WAN, the observation goes to the GPU and the action chunk comes back. On the GPU: your policy over sequence_ai.engine (serve, cuda_graphs, batcher, replicas, slack) and sequence_ai.network (one_write, ping, tcp_link, compressed). Both ends: msgpack_io and latency_stats. Your own link, measured: bench/." src="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/architecture-light.png" width="900">
+  </picture>
+</p>
 
 **`sequence_ai.network`** is the connection between a robot and the GPU its policy runs on. On the robot, `connect()`
 applies the client-side components to one connection, and `openpi.keep()` does the same on the connection that openpi's
