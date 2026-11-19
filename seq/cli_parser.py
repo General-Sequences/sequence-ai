@@ -174,6 +174,8 @@ the core flow:
                             nothing built)
   eval run <policy> --benchmark <name> [--adapter <name>@vN]
                             evaluate a deployed policy on a registered benchmark
+  serve [folder]            serve the folder's @seq.policy from this machine's GPU, a template's weights downloaded
+                            with your key; a robot connects with connect("http://<this machine>:8000")
 
 policy      ls status logs doctor shell debug versions source upgrade rollback stop start rename rm
             set settings fork data
@@ -184,7 +186,7 @@ key         list add set revoke                           (your keys: you, signe
 benchmark   ls tasks versions source logs shell status upgrade cancel rm
 adapter     ls versions source rm check
 eval        run status cancel rm report episodes replay ls logs
-storage     storage · volume put|ls|show|files|get|rm · secret set|ls|rm
+storage     storage · volume put|ls|show|files|get|rm · secret set|ls|rm · weights get
 account     login · logout · profile · audit · models · gpus · account [set|delete] · usage
 billing     top-up redeem credits plan invoices details card    (the console's Billing page; you signed in)
 port        export check-model scaffold compare convert   (a CPU MuJoCo or SAPIEN benchmark to the GPU)
@@ -250,6 +252,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-source", action="store_true", dest="no_source",
                    help="do not download a template's large upstream sources (third_party/SOURCES.json) - the image "
                         "installs them from their official packages either way")
+
+    p = sub.add_parser("serve", description="Serve a folder's @seq.policy from this machine until Ctrl-C: the class "
+                                            "built as the platform builds it - its init= filled, a template's weights "
+                                            "downloaded with your key into ~/.cache/sequence-ai/weights and checked by "
+                                            "their sha256 - a @seq.concurrent policy's acts batched in its sizes as the "
+                                            "platform batches them. A robot connects with sequence_ai.connect("
+                                            "\"http://<this machine>:<port>\"). What the folder's code imports must be "
+                                            "installed here, as its image installs it (requirements-policy.lock).")
+    p.add_argument("folder", nargs="?", default=".", help="the folder `seq init` made (default: this one)")
+    p.add_argument("--name", default=None, help="the policy to serve, when the folder holds several")
+    p.add_argument("--port", type=int, default=8000, help="the port it listens on (default 8000)")
+    p.add_argument("--host", default=None,
+                   help="the address it listens on (default: every address of this machine; 127.0.0.1: this one only)")
+    p.add_argument("--weights", action="append", default=None, metavar="[PART=]DIR",
+                   help="a folder holding the weights, read instead of downloading them; PART=DIR for a named part "
+                        "(repeat it for each)")
+    p.add_argument("--token", default=None,
+                   help="a token each robot must send (sequence_ai.connect(url, token=...))")
 
     p = sub.add_parser("deploy", description="Deploy a @seq.policy, or register a @seq.benchmark, from a folder. "
                                              "The folder is uploaded whole - less version control and caches, a "
@@ -768,6 +788,16 @@ def build_parser() -> argparse.ArgumentParser:
     _secret_rm_p.add_argument("name", help="secret name to delete")
     _secret_rm_p.add_argument("--force", action="store_true",
                               help="delete even while deployments use it — their workers then stop (fail-closed)")
+
+    wsub = _group(ap, sub, "weights", "An official template's weights on this machine, each file checked by its sha256: "
+                                      "what `seq serve` reads.")
+    p = wsub.add_parser("get", help="download one version of a template's weights, with your key",
+                        description="Download one version of an official template's weights - the latest, or the "
+                                    "version @vN names - with your key, into ~/.cache/sequence-ai/weights/<template>/"
+                                    "<version> or --dir, each file checked by its sha256. Files already there are kept, "
+                                    "so a run again downloads what is missing alone. Prints the folder.")
+    p.add_argument("template", help="the template, and a version if you name one (pi05-libero, pi05-libero@v1)")
+    p.add_argument("--dir", default=None, help="the folder to download into")
 
 
 

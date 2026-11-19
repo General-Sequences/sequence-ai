@@ -230,6 +230,13 @@ def _dispatch(args: argparse.Namespace) -> int:
                          no_source=getattr(args, "no_source", False))
     if cmd == "deploy":
         return _cmd_deploy(args)
+    if cmd == "serve":
+        from seq import serve_local
+
+        return serve_local.serve(args.folder, args.name, host=args.host, port=args.port, weights=args.weights,
+                                 token=args.token, base_url=args.base_url)
+    if cmd == "weights":
+        return _cmd_weights(args)
     if cmd == "eval":
         return _cmd_eval(args)
     if cmd == "policy":
@@ -1011,6 +1018,16 @@ def _print_templates(base_url: str | None) -> None:
 
     print("\n".join(template_fetch.lines_by_kind(template_fetch.list_remote(base_url))))
     print("\nseq init <template>[@stable|@beta|@vN] [directory]")
+
+
+def _cmd_weights(args: argparse.Namespace) -> int:
+    """`seq weights get <template>[@vN] [--dir DIR]`: one version of a template's weights here; prints the folder."""
+    from seq import template_fetch, weights_get
+
+    name, ref = template_fetch.split_ref(args.template)
+    folder = weights_get.fetch(name, ref, dest=args.dir, base_url=args.base_url)
+    print(folder)
+    return 0
 
 
 def _cmd_init(template: str | None, dest: str | None, list_only: bool, base_url: str | None, *,

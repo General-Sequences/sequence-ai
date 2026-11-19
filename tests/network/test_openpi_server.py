@@ -29,6 +29,7 @@ pytest.importorskip("websockets")
 
 import websockets.asyncio.server as library  # noqa: E402
 from websockets.sync.client import connect  # noqa: E402
+from websockets.exceptions import ConnectionClosedError  # noqa: E402
 
 from sequence_ai.network import frames, msgpack_io, openpi  # noqa: E402
 from sequence_ai.network.openpi import image_tools  # noqa: E402
@@ -191,7 +192,7 @@ def test_a_second_patch_changes_the_interval_alone_and_the_policy_is_wrapped_onc
     module, policy = _module(), _Policy()
     openpi.patch(server=module, every_s=0.05)
     openpi.patch(server=module, every_s=0.2)
-    assert module._server.options == {"ping_interval": 0.2, "ping_timeout": 20.0}
+    assert module._server.options == {"ping_interval": 0.2, "ping_timeout": None}
     made = module.WebsocketPolicyServer(policy=openpi.Pictures(policy), port=0)
     assert made._policy.policy is policy and made._port == 0
     assert module.WebsocketPolicyServer(policy)._policy.policy is policy
@@ -276,8 +277,123 @@ def test_python_dash_m_runs_the_script_as_its_own_command_with_openpis_server_pa
     said = json.loads(done.stdout.strip().splitlines()[-1])
     assert said["name"] == "__main__" and said["argv"] == ["scripts/serve_policy.py", "--env=DROID", "--port=7447"]
     assert os.path.realpath(said["path0"]) == os.path.realpath(scripts)
-    assert said["policy"] == "Pictures" and said["options"] == {"ping_interval": 0.1, "ping_timeout": 20.0}
+    assert said["policy"] == "Pictures" and said["options"] == {"ping_interval": 0.1, "ping_timeout": None}
     usage = run()
     assert usage.returncode == 2 and usage.stdout.startswith("usage: python -m sequence_ai.network.openpi")
     missing = run("scripts/no_such.py")
     assert missing.returncode != 0 and "no script at scripts/no_such.py" in missing.stderr
+
+
+class _Compiling(_Policy):
+    """A policy whose first inference runs `first_s` on the server's event loop, as a first JAX inference compiles."""
+
+    def __init__(self, first_s):
+        super().__init__()
+        self.first_s = first_s
+
+    def infer(self, obs, *, noise=None):
+        if not self.seen:
+            time.sleep(self.first_s)
+        return super().infer(obs, noise=noise)
+
+
+class _Client:
+    """A client built as openpi_client's WebsocketClientPolicy is - its connection at `_ws`, the server's metadata read
+    on connect, one response for each observation - with a keepalive shorter than the library's 20 s, which a first
+    inference outlasts in the same way."""
+
+    def __init__(self, port, ping_interval=0.05, ping_timeout=0.3):
+        self._ws = connect(f"ws://127.0.0.1:{port}", compression=None, max_size=None, ping_interval=ping_interval,
+                           ping_timeout=ping_timeout)
+        self.metadata = msgpack_io.unpack(self._ws.recv())
+
+    def infer(self, obs):
+        self._ws.send(msgpack_io.pack(obs))
+        return msgpack_io.unpack(self._ws.recv())
+
+
+def test_a_first_inference_longer_than_the_clients_pong_timeout_closes_no_kept_connection():
+    module = _module()
+    openpi.patch(server=module, every_s=0.05)
+    with _serving(module, _Compiling(1.0)) as (_, port):
+        bare = _Client(port)
+        with pytest.raises(ConnectionClosedError, match="keepalive ping timeout"):
+            bare.infer({"x": np.zeros(3)})                    # the library's own keepalive gives up on the server
+    with _serving(module, _Compiling(1.0)) as (_, port):
+        client = _Client(port)
+        kept = openpi.keep(client, every_s=0.05)
+        try:
+            assert client.infer({"x": np.zeros(3)})["actions"].shape == (10, 8)
+            assert client.infer({"x": np.zeros(3)})["actions"].shape == (10, 8)
+        finally:
+            kept.close()
+
+
+def test_keep_sends_no_ping_while_an_infer_is_in_flight_and_pings_again_once_idle():
+    from websockets.sync.server import serve as serve_in_threads
+
+    def handler(ws):
+        ws.send(msgpack_io.pack({}))
+        for _ in ws:
+            time.sleep(0.6)                                   # an inference, this server answering pings meanwhile
+            ws.send(msgpack_io.pack({"actions": np.zeros((10, 8), np.float32)}))
+
+    server = serve_in_threads(handler, "127.0.0.1", 0, compression=None, max_size=None)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        client = _Client(server.socket.getsockname()[1], ping_interval=None, ping_timeout=None)
+        sent, ping = [], client._ws.ping
+        client._ws.ping = lambda *args, **kwargs: (sent.append(time.monotonic()), ping(*args, **kwargs))[1]
+        kept = openpi.keep(client, every_s=0.02)
+        try:
+            began = time.monotonic()
+            client.infer({"x": np.zeros(3)})
+            ended = time.monotonic()
+            time.sleep(0.3)
+        finally:
+            kept.close()
+    finally:
+        server.shutdown()
+    assert len([t for t in sent if began < t < ended]) <= 1   # at most one, begun as the infer() began
+    assert len([t for t in sent if t > ended]) >= 2 and kept.warm.pings >= 2
+
+
+def test_the_patched_server_waits_for_each_pong_as_long_as_it_takes_unless_told_otherwise():
+    module = _module()
+    openpi.patch(server=module)
+    assert module._server.options == {"ping_interval": 0.1, "ping_timeout": None}
+    openpi.patch(server=module, every_s=0.05, timeout_s=30)
+    assert module._server.options == {"ping_interval": 0.05, "ping_timeout": 30.0}
+
+
+def _client_module(monkeypatch, made, unanswered):
+    """openpi_client as connect() imports it: a WebsocketClientPolicy whose first `unanswered` handshakes time out."""
+
+    class WebsocketClientPolicy:
+        def __init__(self, host="0.0.0.0", port=None, api_key=None):
+            made.append((host, port, api_key))
+            if len(made) <= unanswered:
+                raise TimeoutError("timed out while waiting for handshake response")
+
+    module = types.ModuleType("openpi_client.websocket_client_policy")
+    module.WebsocketClientPolicy = WebsocketClientPolicy
+    package = types.ModuleType("openpi_client")
+    package.websocket_client_policy = module
+    monkeypatch.setitem(sys.modules, "openpi_client", package)
+    monkeypatch.setitem(sys.modules, "openpi_client.websocket_client_policy", module)
+    monkeypatch.setattr(openpi, "RETRY_S", 0.01)
+    return WebsocketClientPolicy
+
+
+def test_connect_waits_for_a_server_that_has_not_answered_its_handshake(monkeypatch):
+    made = []
+    made_as = _client_module(monkeypatch, made, unanswered=2)
+    policy = openpi.connect("gpu.example", 8000, api_key="key_user")
+    assert isinstance(policy, made_as) and made == [("gpu.example", 8000, "key_user")] * 3
+
+
+def test_connect_gives_up_past_its_wait(monkeypatch):
+    _client_module(monkeypatch, [], unanswered=10 ** 6)
+    with pytest.raises(TimeoutError, match="handshake"):
+        openpi.connect("gpu.example", 8000, wait_s=0.05)
+

@@ -45,6 +45,13 @@ every request.
   pings, and under 1 ms with them.
 
 A ping cannot keep a window that the pings do not fill; BBR, or `tcp_slow_start_after_idle=0`, keeps that one.
+
+**An act in halves.** Where the window restarts anyway - on Linux without BBR, after a policy whose answer takes longer
+than the retransmission timeout - `connect()` sends an act whose body is more than the restarted window's first flight
+and no more than two (13,032 to 26,064 bytes on Ethernet) in two halves at once, each on a connection of its own, so
+each fits a first flight of its own. `serve()` joins them and runs the act once. Measured at a 50 ms round trip with a
+200 ms policy, 13 to 26 KB acts took a p50 of 108 to 111 ms whole and 56.5 to 57.0 ms in halves; `split=False` sends
+them whole.
 `window.check()` issues a warning once per process, with both ways to keep the window, and changes nothing on the
 machine.
 [Why does my robot's upload get slow after a pause?](why-does-my-robots-upload-get-slow-after-a-pause.md) has the
@@ -161,6 +168,7 @@ ping (`ping_path=None` disables the pings). [`examples/server.py`](../examples/s
 | `timeout` | `10.0` | seconds to wait for a response |
 | `headers` | `None` | headers sent with every request |
 | `check` | `True` | warn once if this machine restarts its window after a pause, and if Wi-Fi power saving is on |
+| `split` | `True` | an act whose window a pause restarted, one to two first flights long, sent in two halves on two connections while the server joins them |
 
 **One connection, kept open.** This is one line in any client: create one `httpx.Client` and reuse it. Measured: a
 new connection for each call took a median 305.9 ms; one reused connection, 121.0 ms. The handshake was 184.9 ms per
@@ -303,11 +311,10 @@ uv run --with sequence-ai python -m sequence_ai.network.openpi scripts/serve_pol
 ```
 
 ```python
-from openpi_client import websocket_client_policy
 from sequence_ai.network import openpi
 from sequence_ai.network.openpi import image_tools     # in place of openpi_client's: pictures go as JPEG
 
-policy_user = websocket_client_policy.WebsocketClientPolicy(host_user, port_user)
+policy_user = openpi.connect(host_user, port_user)    # openpi_client's own client, once its server answers
 kept_user = openpi.keep(policy_user)  # BBR and TCP keepalive on its socket; a WebSocket ping while it is idle
 observation_user["observation/image"] = image_tools.resize_with_pad(frame_user, 224, 224)
 action_user = policy_user.infer(observation_user)     # as before

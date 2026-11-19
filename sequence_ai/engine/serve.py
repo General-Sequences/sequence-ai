@@ -36,6 +36,9 @@ What each part does by default, and how to change it:
     once per act         copies of one act - a robot's over each of its uplinks (network.lines),      -
                          each with the act's X-Seq-Request-Id - run the policy once: each copy gets
                          that answer, kept 30 s, and X-Seq-Reads says "once"
+    halves               an act a robot sends in two halves, each on a connection of its own          -
+                         (X-Seq-Half), is joined and run as one: the first half gets the answer, the
+                         second 202 when it is here; X-Seq-Reads says "split"
     warm-up              with `example`, the policy runs on it twice at each batch size before        example=None
                          /ping says ready, and GET /example hands it out
     inputs               numpy arrays as arrays, each the policy's own to write into                  -
@@ -83,7 +86,8 @@ import time
 from typing import Any, Callable, Iterable, Optional
 
 from ..network import compressed, frames, msgpack_io
-from ..network.link import COPY_HEADER, ONCE, READS_HEADER, REQUEST_HEADER, SERVER_HEADER
+from ..network.link import (COPY_HEADER, HALF_HEADER, HALF_MISSING, ONCE, READS_HEADER, REQUEST_HEADER, SERVER_HEADER,
+                            SPLIT)
 from .batcher import Batcher
 
 __all__ = ["App", "serve", "TOKEN_ENV", "LIMIT", "KEEP_ALIVE_S"]
@@ -98,9 +102,31 @@ RETRY_AFTER_S = 1                 # what a ping during the warm-up says to wait
 # of one act, one over each of its uplinks, reach the server within the slower uplink's delay of each other.
 ONCE_KEEP_S = 30.0
 ONCE_KEEP_N = 256
+# An act's halves (HALF_HEADER): how long its first half waits for its second before it is answered HALF_MISSING, and
+# for how many acts halves are kept while they wait. Two halves sent at once over one path come within its jitter of
+# each other, a lost packet's resend within a few hundred milliseconds.
+HALF_WAIT_S = 2.0
+HALF_KEEP_N = 64
 
 _TEXT = b"text/plain; charset=utf-8"
 _REQUEST = REQUEST_HEADER.lower().encode()
+_HALF = HALF_HEADER.lower().encode()
+_FIRST, _SECOND = b"1/2", b"2/2"
+_COPY = (COPY_HEADER.lower().encode(), b"1")
+
+
+class _Halves:
+    """One act's halves as they come (App._half): each half's bytes, when the first of them came, the act's answer and
+    when its body was whole once both are here (joined), and whether a first half has taken that answer."""
+
+    __slots__ = ("first", "second", "came", "joined", "taken")
+
+    def __init__(self) -> None:
+        self.first: Optional[bytes] = None
+        self.second: Optional[bytes] = None
+        self.came = time.monotonic()
+        self.joined: asyncio.Future = asyncio.get_running_loop().create_future()
+        self.taken = False
 
 
 class App:
@@ -138,12 +164,14 @@ class App:
         self._token = token.encode() if token else None
         self._limit = int(limit)
         self._example_body = None if example is None else msgpack_io.pack(example)
-        # what it restores, and that it runs an act once by its request id (ONCE): a robot sends an act over two
-        # uplinks only to a server that says so
-        said = ([frames.PICTURE_KIND] if jpeg else []) + (list(compressed.CODECS) if compress else []) + [ONCE]
+        # what it restores, that it runs an act once by its request id (ONCE) and that it joins an act's halves (SPLIT):
+        # a robot sends an act over two uplinks, or in two halves, only to a server that says so
+        said = ([frames.PICTURE_KIND] if jpeg else []) + (list(compressed.CODECS) if compress else []) + [ONCE, SPLIT]
         self._reads, self._jpeg = ", ".join(said).encode(), bool(jpeg)
         # each act's answer by its request id, while its copies may still come: (when it was first seen, its answer)
         self._once: "collections.OrderedDict[bytes, tuple[float, asyncio.Future]]" = collections.OrderedDict()
+        # the halves of each act by its request id, while the other half may still come (_half)
+        self._halves: "collections.OrderedDict[bytes, _Halves]" = collections.OrderedDict()
         # what it says it is, on every response and, at more length, in its ping's answer (link.SERVER_HEADER)
         self._version, self._began = _version(), time.monotonic()
         self._name = getattr(policy, "__qualname__", None) or type(policy).__name__
@@ -310,16 +338,68 @@ class App:
             await self._too_large(send)
             return
         began = time.perf_counter()
-        rid = _header(scope, _REQUEST)
+        rid, half = _header(scope, _REQUEST), _header(scope, _HALF)
+        if half:
+            await self._half(send, rid, half, body)
+            return
         held = self._held(rid) if rid else None
         extra: list = []
         if held is not None:
             # another copy of this act came in first (REQUEST_HEADER): its answer, the policy run for that one alone
-            extra.append((COPY_HEADER.lower().encode(), b"1"))
+            extra.append(_COPY)
         else:
             held = asyncio.ensure_future(self._reply(body))
             if rid:
                 self._hold(rid, held)
+        await self._answer(send, held, began, extra)
+
+    async def _half(self, send, rid: bytes, half: bytes, body: bytes) -> None:
+        """One half of an act (HALF_HEADER), in either order: kept until the other is here, then the act's body joined
+        and run as an act of its own - its answer to the first half, 202 to the second as soon as it is here. The first
+        half waits HALF_WAIT_S at most from when either came, then is answered HALF_MISSING: the robot sends the act
+        whole. A half of an act already run (its copy came whole, over another uplink) gets what that act got."""
+        if half not in (_FIRST, _SECOND) or not rid:
+            await self._respond(send, 400, f"{HALF_HEADER} is 1/2 or 2/2, beside the act's {REQUEST_HEADER}".encode())
+            return
+        held, halves, extra = self._held(rid), None, []
+        if held is not None:
+            extra.append(_COPY)
+        else:
+            halves = self._halves.get(rid)
+            if halves is None:
+                self._let_go_of_halves()
+                halves = self._halves[rid] = _Halves()
+            if half == _FIRST:
+                halves.first = body
+            else:
+                halves.second = body
+            if halves.first is not None and halves.second is not None:
+                held = asyncio.ensure_future(self._reply(halves.first + halves.second))
+                self._hold(rid, held, joined=True)
+        if half == _SECOND:
+            await self._respond(send, 202, b"")
+            return
+        began = time.perf_counter()
+        if held is None:
+            try:
+                held, began, copy = await asyncio.wait_for(asyncio.shield(halves.joined),
+                                                           max(0.0, HALF_WAIT_S - (time.monotonic() - halves.came)))
+            except asyncio.TimeoutError:
+                if self._halves.get(rid) is halves:
+                    del self._halves[rid]
+                await self._respond(send, HALF_MISSING, f"the second half of this act ({HALF_HEADER} 2/2) did not "
+                                    f"come within {HALF_WAIT_S:g} s: send the act whole".encode())
+                return
+            if copy:                                 # a whole copy of the act ran it while this half waited
+                extra.append(_COPY)
+        if halves is not None:
+            if halves.taken and not extra:           # another copy's first half took the answer first
+                extra.append(_COPY)
+            halves.taken = True
+        await self._answer(send, held, began, extra)
+
+    async def _answer(self, send, held: asyncio.Future, began: float, extra: list) -> None:
+        """An act's answer, from `held`, with how long the server took from `began` (the act's last byte) to it."""
         # shielded: a copy whose robot is gone takes nothing from the other copy's answer
         status, payload, content_type, model_s = await asyncio.shield(held)
         timing = None if model_s is None else (f"act;dur={(time.perf_counter() - began) * 1000:.1f}, "
@@ -329,6 +409,8 @@ class App:
     async def _reply(self, body: bytes) -> tuple:
         """What /act answers `body` with: (status, body, its content type, the policy's seconds - None where the policy
         did not answer it)."""
+        if len(body) > self._limit:                  # an act's two halves joined, each of them within it
+            return 413, f"the act's halves are over this server's limit of {self._limit} bytes".encode(), _TEXT, None
         try:
             observation = _own(self._restore(body))
         except ValueError as e:                      # MsgpackError, CompressedError, a picture that is not a JPEG
@@ -352,9 +434,10 @@ class App:
             return None
         return kept[1]
 
-    def _hold(self, rid: bytes, answer: asyncio.Future) -> None:
-        """Keep `answer` for the other copies of the act `rid` names. The oldest answers kept are let go once past
-        ONCE_KEEP_S or ONCE_KEEP_N, never one still being worked out."""
+    def _hold(self, rid: bytes, answer: asyncio.Future, *, joined: bool = False) -> None:
+        """Keep `answer` for the other copies of the act `rid` names, and hand it to a first half of that act waiting
+        for it: the act its halves made (`joined`), or a copy of it that came whole. The oldest answers kept are let go
+        once past ONCE_KEEP_S or ONCE_KEEP_N, never one still being worked out."""
         now = time.monotonic()
         self._once[rid] = (now, answer)
         self._once.move_to_end(rid)
@@ -363,6 +446,19 @@ class App:
             if not (now - seen > ONCE_KEEP_S or len(self._once) > ONCE_KEEP_N) or not kept.done():
                 break
             del self._once[oldest]
+        halves = self._halves.pop(rid, None)         # its halves: `joined` here, or waiting while a whole copy ran it
+        if halves is not None and not halves.joined.done():
+            halves.joined.set_result((answer, time.perf_counter(), not joined))
+
+    def _let_go_of_halves(self) -> None:
+        """Before another act's halves are kept: those kept past HALF_WAIT_S let go, and the oldest until fewer than
+        HALF_KEEP_N acts' are - a first half that waited for them is answered HALF_MISSING at its wait's end."""
+        now = time.monotonic()
+        while self._halves:
+            rid, halves = next(iter(self._halves.items()))
+            if now - halves.came <= HALF_WAIT_S and len(self._halves) < HALF_KEEP_N:
+                break
+            del self._halves[rid]
 
     async def _too_large(self, send) -> None:
         await self._respond(send, 413, f"the body is over this server's limit of {self._limit} bytes".encode(),
@@ -516,9 +612,10 @@ def serve(policy: Callable[[Any], Any], *, host: Optional[str] = None, port: int
     paths = "POST /act, GET /ping" + (", GET /example" if example is not None else "")
     calls = "one observation per call" if batch is None else \
         f"batches of {', '.join(str(n) for n in sorted({int(n) for n in batch}))}"
-    restores = ", ".join(word for word in app._reads.decode().split(", ") if word and word != ONCE)
-    log.info("serving %s on %s (%s); %s; reads %s; an act's copies run it once", getattr(policy, "__qualname__",
-             type(policy).__name__), where, paths, calls, restores or "nothing but plain msgpack")
+    restores = ", ".join(word for word in app._reads.decode().split(", ") if word and word not in (ONCE, SPLIT))
+    log.info("serving %s on %s (%s); %s; reads %s; an act's copies run it once, its halves joined",
+             getattr(policy, "__qualname__", type(policy).__name__), where, paths, calls,
+             restores or "nothing but plain msgpack")
     if token:
         log.info("a robot needs the token: connect(url, token=...)")
     elif not all(_loopback(sock) for sock in sockets):
@@ -617,10 +714,16 @@ def _loopback(sock: socket.socket) -> bool:
 
 
 def _log_with(level: Optional[str]) -> None:
-    """This module's lines through uvicorn's own handler, at its level, where nothing else is set up to show them."""
-    if level is None or log.handlers or logging.getLogger("sequence_ai").handlers or logging.getLogger().handlers:
+    """This module's lines through uvicorn's own handler, at its level, where nothing else is set up to show them. A root
+    logger that would drop them counts as nothing: one a library set up at WARNING on import, as absl does for a JAX
+    policy, would hide the warm-up and "ready" lines."""
+    if level is None or log.handlers or logging.getLogger("sequence_ai").handlers:
+        return
+    wanted = logging.getLevelName(level.upper()) if isinstance(level, str) else level
+    root = logging.getLogger()
+    if root.handlers and root.isEnabledFor(wanted):
         return
     for handler in logging.getLogger("uvicorn").handlers:
         log.addHandler(handler)
-    log.setLevel(level.upper() if isinstance(level, str) else level)
+    log.setLevel(wanted)
     log.propagate = False

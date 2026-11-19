@@ -538,8 +538,8 @@ r_user.content       # the reply — no choices[0] wrapper
 r_user.tool_calls    # set instead when finish_reason == "tool_calls"
 ```
 
-`chat()` is the slow brain: a sentence in, a sentence (or a tool call) out. It is answered by an
-external provider with no cold start. `reasoning={"effort": "minimal"}` and the other model
+`chat()` is the slow brain: a sentence in, a sentence (or a tool call) out. It answers with no cold
+start. `reasoning={"effort": "minimal"}` and the other model
 parameters (seed, stop, top_p, …) pass through under their usual names (a model's
 `supported_parameters` in `models()` says which it takes); reasoning tokens are billed output and
 count against `max_tokens`.
@@ -547,6 +547,10 @@ count against `max_tokens`.
 probabilities; `help(sequence_ai.decide)` shows the `criteria` each question type needs. Both
 results carry `cost_usd`. A request the provider rejects raises `InvalidRequest` in its own words;
 a provider error (502) or a rate limit / no answer (503) raises `Unavailable`; none is billed.
+
+With `server="openrouter"` and your own OpenRouter key, or `server=` set to the address of a server of your own with
+the OpenAI chat completions API, `chat()` and `Conversation` send the turn there instead, without a General Sequences
+key: [How do I use an LLM with my own OpenRouter key?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-use-an-llm-with-my-own-openrouter-key.md)
 
 ## Benchmarks & eval
 
@@ -826,6 +830,8 @@ import seq
 
 @seq.policy(
     hz=15,                                     # the steps a second its answers play at: every policy names it
+    robot="Panda",                             # the arm it was made for, as benchmarks name arms: an eval runs it
+                                               # on that arm unless the eval names another
     gpu="L4",                                  # the one card `seq gpus` lists ("H100:2" is two of them), or "cpu";
                                                # a start waits for it and never switches to another
     max_gpus=1,                                # the most cards it holds at once: required on a GPU
@@ -1310,7 +1316,7 @@ data) - and the dry run prices it; without a key it is the checks here alone, an
 
 ```
 policy      my_pi05_user
-contract    valid for deployment contract 0.5.51, the one this version of sequence-ai speaks (the platform checks it again when you deploy)
+contract    valid for deployment contract 0.5.52, the one this version of sequence-ai speaks (the platform checks it again when you deploy)
 image       nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04@sha256:131e238d724ee145317f10d6c8eba0d301439c6c8764b02473510e7035756e81
   add               third_party/openpi/src → /opt/openpi/src
   add               third_party/openpi/packages/openpi-client → /opt/openpi/packages/openpi-client
@@ -1498,6 +1504,15 @@ credit it ends on its own, status `shut_down`. It is billed per second it runs �
 machine's CPU and memory at the serving rate, the same alone or among eight, at least 60 s each time it starts — and
 counts against the same GPU limit serving and evals share, a card each (`seq account` shows it, 15 on Starter, 50 on
 Team).
+
+A template runs on one of these machines, or on a GPU of your own: `seq init <template> <folder>`, install what
+its image installs (the packages its `requirements-policy.lock` pins and the steps its `image=` lists), then run `seq
+serve` in the folder. It builds the policy as a deployment does, its `init=` filled and the template's weights
+downloaded with your General Sequences key into `~/.cache/sequence-ai/weights`, each checked by its sha256 (`seq weights
+get <template>` downloads them alone), and serves it on port 8000; a robot connects with
+`sequence_ai.connect("http://<its address>:8000")`.
+`--weights <folder>` reads your own fine-tune instead.
+[How do I run a template on my own GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-run-a-template-on-my-own-gpu.md)
 
 ## Quotas
 

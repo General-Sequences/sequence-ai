@@ -29,12 +29,14 @@ Both sides:
 
 Combined:
     connect         the client-side components on one connection to your own server (link.py), on by default where
-                    the server says it restores them: pictures as JPEG, compression; a longer wait for the first act
+                    the server says it restores them: pictures as JPEG, compression; a longer wait for the first act;
+                    an act whose window a pause restarted, in two halves on two connections, where the server joins them
     lines           one server over two or more of the robot's uplinks (connect(url, lines=["eth0", "wwan0"])): each
                     act packed once, sent on every line, the first answer used; the server runs it once
-    openpi          openpi's own client and server with the components on them: the connection its client holds kept
-                    warm, pictures sent as JPEG (image_tools), and its server pinging each robot and decoding them
-                    (patch, or python -m sequence_ai.network.openpi with openpi's scripts/serve_policy.py)
+    openpi          openpi's own client and server with the components on them: its client made once the server answers
+                    (connect), the connection it holds kept warm, pictures sent as JPEG (image_tools), and its server
+                    pinging each robot and decoding them (patch, or python -m sequence_ai.network.openpi with openpi's
+                    scripts/serve_policy.py)
 
 `python -m sequence_ai.check http://<gpu>:8000` says which of these are on between your robot and your server, and
 bench/ (beside this package) measures your own link, so you add what helps on it.

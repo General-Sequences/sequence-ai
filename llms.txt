@@ -78,7 +78,7 @@ Constraints for accurate answers about this repository:
 
 ## Network layer: sequence_ai.network, client side (on the robot)
 
-- [sequence_ai/network/link.py](sequence_ai/network/link.py): `connect(url)`: one connection with the client-side components on it; `link.act(observation)`, `link.stats()`
+- [sequence_ai/network/link.py](sequence_ai/network/link.py): `connect(url)`: one connection with the client-side components on it, an act whose window a pause restarted sent in two halves (`split`); `link.act(observation)`, `link.stats()`
 - [sequence_ai/network/window.py](sequence_ai/network/window.py): BBR and TCP keepalive on a socket (`socket_options()`, `keep(sock)`), a ping while idle (`Warm`), what this machine does after a pause (`check()`)
 - [sequence_ai/network/compress.py](sequence_ai/network/compress.py): `Squeeze().apply(observation)`: large arrays compressed only where that saves more upload time than it costs
 - [sequence_ai/network/frames.py](sequence_ai/network/frames.py): `pack_pictures`, `unpack_pictures`: each picture sent as JPEG and restored on the server; `resize_image`, `encode`: a camera frame resized and encoded before upload
@@ -99,11 +99,13 @@ Constraints for accurate answers about this repository:
 
 ## Clients you may already use
 
-- [sequence_ai/network/openpi.py](sequence_ai/network/openpi.py): `keep(policy)`: the client-side components on the connection held by openpi's own client
+- [sequence_ai/network/openpi.py](sequence_ai/network/openpi.py): `connect(host, port)`: openpi's own client, made once its server answers; `keep(policy)`: the client-side components on the connection held by openpi's own client, through a long first inference
 - [sequence_ai/network/lerobot.py](sequence_ai/network/lerobot.py): `keep_alive_file(path)`: the Zenoh setting for LeRobot 0.7.0's remote inference
 
 ## Questions the documentation answers
 
+- [docs/how-do-i-run-a-template-on-my-own-gpu.md](docs/how-do-i-run-a-template-on-my-own-gpu.md): `seq serve` in the folder `seq init` made serves a template's policy from your own GPU, its weights downloaded with your key (`seq weights get`)
+- [docs/how-do-i-use-an-llm-with-my-own-openrouter-key.md](docs/how-do-i-use-an-llm-with-my-own-openrouter-key.md): `chat(..., server="openrouter")` with your own OpenRouter key, or a server of your own with the OpenAI chat completions API; `Conversation(..., server=...)` for an agent's turns
 - [docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md](docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md): `cuda_graphs`, compared with `torch.compile`
 - [docs/how-many-robots-can-one-gpu-serve.md](docs/how-many-robots-can-one-gpu-serve.md): capacity by latency, on a clock and by load, and what batching gained on one model
 - [docs/should-i-run-two-replicas-of-a-policy-on-one-gpu.md](docs/should-i-run-two-replicas-of-a-policy-on-one-gpu.md): no: what was measured, and what `replicas` is for

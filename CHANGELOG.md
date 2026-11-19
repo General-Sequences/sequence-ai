@@ -3,6 +3,23 @@
 What changed in each release of `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
+## 0.64.0 — 2026-11-19
+
+A template's policy runs on your own GPU, `chat()` takes your own OpenRouter key, a policy names its robot arm, and an
+act after a pause goes in halves where that saves a round trip.
+
+### Added
+
+- Off the platform, `seq serve` serves a template's policy from your GPU (`seq weights get`), and `chat()` takes
+  `server="openrouter"` with your own OpenRouter key.
+- `@seq.policy(robot=)` names the arm a policy is for, which a benchmark's `"{policy.robot}"` argument takes unless an
+  eval's `--param` or `--sweep` sets another.
+
+### Fixed
+
+- `openpi.keep()` and `openpi.patch()` keep a connection through a long first inference, and `openpi.connect()`
+  waits for a server still loading.
+
 ## 0.63.1 — 2026-11-18
 
 A robot whose address changes while it runs is let back into its GPU by itself, and on a line whose round trip

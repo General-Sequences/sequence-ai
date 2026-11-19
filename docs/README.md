@@ -48,10 +48,18 @@ The code is the same wherever the GPU comes from: `serve(policy)` on it, `connec
 - [How do the components compare with openpi's remote inference and LeRobot's?](comparison.md)
 - [What does each network component do?](components.md)
 
+## Language models: `sequence_ai.chat`
+
+- [How do I use an LLM with my own OpenRouter key?](how-do-i-use-an-llm-with-my-own-openrouter-key.md):
+  `chat(server="openrouter")` with your own OpenRouter key, or a server of your own with the OpenAI chat
+  completions API
+
 ## A GPU near the robot
 
 - [How do I get a GPU near my robot?](how-do-i-get-a-gpu-near-my-robot.md). Any GPU the robot can reach works, and
   the robot's code changes in one line.
+- [How do I run a template on my own GPU?](how-do-i-run-a-template-on-my-own-gpu.md). `seq serve` in the folder `seq init`
+  made: the policy built as a deployment builds it, the template's weights downloaded with your key.
 - [The platform guide](../platform.md): a deployment hosted by General Sequences, from writing a policy class to driving
   a robot with it, with its references for [benchmarks and evals](../eval.md) and
   [debugging a deployment](../observability.md).

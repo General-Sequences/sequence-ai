@@ -26,6 +26,7 @@ link_user = sequence_ai.connect("http://YOUR_GPU:8000")            # on the robo
 | Server time | `Server-Timing: act;dur=…, model;dur=…` on each response: the server's time and the policy's, so the robot does not count them as the link's | always on |
 | Token | None, unless `$SEQ_SERVE_TOKEN` is set | `token="…"`: every request must carry `Authorization: Bearer …` |
 | Once per act | Copies of one act, a robot's over each of its uplinks with the same `X-Seq-Request-Id`, run the policy once: each copy gets that answer, kept 30 s, and `X-Seq-Reads` says `once` | always on |
+| Halves | An act a robot sends in two halves, each on a connection of its own, is joined and run once: the first half is answered with the act's answer, the second with `202`, and `X-Seq-Reads` says `split` | always on |
 | Idle connections | Kept open 5 minutes | always on |
 | Size | A request's body, and each compressed array or picture in it once restored, up to 64 MB | `limit=` |
 
@@ -38,7 +39,8 @@ link_user = sequence_ai.connect("http://YOUR_GPU:8000")            # on the robo
 | The first wait | The first act waits up to 120 s for its response, the others 10 s | `first_timeout=10.0` |
 | Pings when idle | A small GET on the same connection after each 100 ms of idle time, for up to a minute | `ping_path=None` |
 | Pings out of an act's way | Once the robot's acts come at a steady spacing, a ping whose answer might still be on its way when the next act is due - judged by the slowest tenth of the last 32 pings' round trips - is not sent. On Linux without BBR, where a pause restarts the window, the one ping that alone keeps it (the connection's silence still under a round trip and 200 ms) is sent all the same; `stats()` counts the others as `pings_yielded` | `ping_yield=False` |
-| One connection | Every request and ping on one kept connection, never two at once | always on |
+| An act in halves | On Linux without BBR, an act sent after a silence of more than a round trip and 200 ms meets a window Linux has restarted to 10 packets. An act whose body is more than that first flight and no more than two (13,032 to 26,064 bytes on Ethernet) goes in two halves at once, each on a connection of its own, while the server says it joins them; `stats()` counts them as `acts_in_halves` | `split=False` |
+| One connection | Every request and ping on one kept connection, never two at once; only an act's second half goes on a second one | always on |
 | BBR and TCP keepalive | Requested on the connection's socket, where the machine allows them | always on |
 | Machine checks | One warning when Wi-Fi power saving is on (on macOS, which gives nothing to read it from, when the requests go over Wi-Fi), and one when the machine restarts its window after a pause | `check=False` |
 | Who answers | One warning when the server's answers do not say it is `serve()`: another program may answer at that address | `check=False` |

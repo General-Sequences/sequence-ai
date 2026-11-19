@@ -31,14 +31,24 @@ What it does by default, and how to turn each off:
                         On Linux without BBR, where a pause restarts the window, the ping that alone keeps it - the
                         connection's silence still under a round trip and 200 ms, Linux's least retransmission
                         timeout - is sent all the same (pings_yielded counts those left out)       ping_yield=False
+    an act in halves    on Linux without BBR, an act sent after a silence past a round trip and 200 ms - or after a
+                        ping sent past it - meets a window restarted to 10 packets: when its body is more than that
+                        first flight carries (9 packets of the connection's segment size, the request's headers in
+                        the tenth: 13,032 bytes on Ethernet) and no more than two, it goes in two halves at once,
+                        each on a connection of its own, to a server that joins them (X-Seq-Reads names "split";
+                        serve() does): each half fits its own first flight (acts_in_halves)        split=False
     BBR, keepalive      on the connection's socket, where this machine allows them (window)
+    kept while idle     each connection kept 240 s with nothing sent on it (KEPT_S), where an HTTP client keeps
+                        5 s, under serve()'s 300 s: a robot back from a pause past its pings acts on the connection
+                        it had, a handshake sooner
 jpeg=True and compress=True send them whatever the server says, for a server that restores them and does not say so.
 `token` sends `Authorization: Bearer <token>`, for a server started with one.
 
 In one sentence: connect() opens one httpx connection with window.socket_options() on its socket → each response's
 X-Seq-Reads says what the server restores (the latest one counts) → act() packs the observation with msgpack_io, its
-pictures as JPEG and its large arrays compressed where the server restores them, posts it and reads the response →
-between requests a small GET is sent on the same connection after each `ping_every_s` of idle time (window.Warm) → each
+pictures as JPEG and its large arrays compressed where the server restores them, posts it - in two halves on two
+connections when its window has restarted and it is one to two first flights long - and reads the response → between
+requests a small GET is sent on the same connection after each `ping_every_s` of idle time (window.Warm) → each
 request's time is recorded (latency_stats) and read with stats().
 
 WHY one connection and a lock: an HTTP/1.1 client that starts a request while a ping is in flight opens a second
@@ -47,7 +57,20 @@ pool holds one connection, a ping is skipped while a request is in flight, and a
 flight waits for it: one round trip at most, and only when the two coincide. That wait is in each act's time (act_us,
 counted from when act() queued the request) and also on its own (ping_wait_us, acts_behind_ping), so it shows; and
 with ping_yield, a ping that would meet the next act is left out (the defaults above), so the two coincide only when
-the robot's act comes off its spacing.
+the robot's act comes off its spacing. The second connection carries only acts' second halves, opened before the first.
+WHY halves, and only then: Linux restarts the window of a connection that sent nothing past its retransmission timeout
+(window), and a body that does not fit the restarted window's first flight waits a round trip for the rest; another
+connection has a first flight of its own. Measured on Linux 6.10 over a 1500-byte MTU, a policy of 200 ms - its silence
+spends the timeout before any ping can keep the window - and an act every 533 ms: at a 50 ms round trip (80 acts
+each), bodies of 13.2 to 26.1 KB took a p50 of 108 to 111 ms whole and 56.5 to 57.0 ms in halves (p99 117 to 118
+against 62 to 64); at 20 and 100 ms (40 acts each), 48 to 50 against 26, and 211 to 212 against 107 to 109; with a 10
+Mbit/s uplink, 110 to 115 against 68 to 78. Where the window was kept - pings with a 5 ms policy, net.ipv4.tcp_slow_start_after_idle 0 as with
+BBR - a whole act took one round trip already and halves saved nothing; and a body of more than two first flights took
+two round trips either way (28 to 120 KB).
+WHY each connection is kept 240 s while idle: an HTTP client closes an idle connection after 5 s of its own, so a robot
+whose pings had stopped (ping_for_s) paid a new connection's handshake on its next act - the round trip the pings, BBR
+and halves are there to save. Measured as above, 8 acts each 8 s after the pings stopped: kept, a p50 of 64.2 ms, all
+on one connection; at 5 s, 121.5 ms, each on a new one.
 WHY JPEG only for HxWx3 uint8 arrays, and only while the server says it reads it: JPEG changes a picture's values a
 little (frames.DEFAULT_JPEG_QUALITY has how much), and a server that does not restore the map it is sent as would hand
 the map to its policy.
@@ -65,8 +88,11 @@ Needs httpx, which sequence-ai installs.
 """
 from __future__ import annotations
 
+import concurrent.futures
+import socket
 import threading
 import time
+import uuid
 from collections import deque
 from typing import Any, Callable, NamedTuple, Optional
 
@@ -91,6 +117,13 @@ REQUEST_HEADER = "X-Seq-Request-Id"
 ONCE = "once"
 # The header on the answer to a copy of an act whose answer another copy got: the policy ran once, for the other.
 COPY_HEADER = "X-Seq-Request-Copy"
+# An act sent in two halves, each on a connection of its own (split): each half is a POST to the act's path with the
+# act's REQUEST_HEADER and HALF_HEADER "1/2" (the body's first bytes) or "2/2" (the rest). A server that joins them says
+# SPLIT in READS_HEADER; it answers the first half with the act's answer and the second with 202 as soon as it has it,
+# and the first half with HALF_MISSING when the second has not come within its wait - the robot then sends the act whole.
+HALF_HEADER = "X-Seq-Half"
+SPLIT = "split"
+HALF_MISSING = 424
 FIRST_TIMEOUT_S = 120.0        # the first act's wait: a policy compiled on its first inference took 32 to 43 s
 # A ping that yields to the robot's next act (Link._yields_now): the acts' spacing is the median of the gaps between the
 # last YIELD_ACTS + 1 acts asked for, read once YIELD_MIN_GAPS of them are known; a ping is left out only while the
@@ -107,6 +140,24 @@ RECHECK_S = 0.01               # how close to that silence's end a ping left out
 # median of the last 8 fell short of the next by 40 ms or more one time in five, and the ping it let go met the act
 YIELD_TRIP_Q = 0.9
 YIELD_TRIPS = 32
+# split: an act goes in two halves when its connection's window restarts at its send (Link._restarts_now) and its body
+# is more than a first flight after a pause carries and no more than two: FIRST_FLIGHT packets of the connection's
+# segment size (MSS until it is read from the socket), its request's headers in the first of them. After a half that did
+# not reach the server, acts go whole for WHOLE_AGAIN_S.
+FIRST_FLIGHT = 10
+MSS = 1448
+WHOLE_AGAIN_S = 60.0
+# How long each connection is kept while nothing is sent on it: an HTTP client's own default is 5 s, after which the
+# robot's next request paid a new connection's handshake - one round trip more, the one split, BBR and the pings are
+# there to save - once its pings had stopped (ping_for_s), and the second connection between halves. Under serve()'s
+# 300 s (engine.serve.KEEP_ALIVE_S), so that the server never closes one as a request goes; TCP keepalive (window) keeps
+# a router's record of it meanwhile, and finds one that died.
+KEPT_S = 240.0
+
+
+def _request_id() -> str:
+    """A new act's id: `r-` and 8 hex characters, as the platform's are (_core/rid.py)."""
+    return "r-" + uuid.uuid4().hex[:8]
 
 
 class Packed(NamedTuple):
@@ -129,6 +180,16 @@ def _server_seconds(header: Optional[str]) -> float:
     return 0.0
 
 
+def _mss_of(response: Any) -> Optional[int]:
+    """The segment size of the connection `response` came on, from its socket (TCP_MAXSEG); None where it cannot be
+    read."""
+    try:
+        sock = response.extensions["network_stream"].get_extra_info("socket")
+        return int(sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG)) or None
+    except Exception:  # noqa: BLE001 - no socket to read (a transport of another kind): MSS is taken
+        return None
+
+
 def reads_of(header: Optional[str]) -> frozenset:
     """What an X-Seq-Reads header names, lowercased: an empty set for none."""
     return frozenset(part.strip().lower() for part in (header or "").split(",") if part.strip())
@@ -144,7 +205,8 @@ class Link:
                  compress: Optional[bool] = None,
                  jpeg: Optional[bool] = None, timeout: float = 10.0, first_timeout: float = FIRST_TIMEOUT_S,
                  token: Optional[str] = None, headers: Optional[dict] = None, check: bool = True,
-                 bind: Optional[str] = None, on_unreachable: Optional[Callable[["Link"], bool]] = None) -> None:
+                 bind: Optional[str] = None, on_unreachable: Optional[Callable[["Link"], bool]] = None,
+                 split: bool = True) -> None:
         try:
             import httpx
         except ImportError as missing:
@@ -154,18 +216,15 @@ class Link:
         if check:
             wifi_power.check_once()          # warns once, on its own thread: Wi-Fi power saving, if it is on
             window.check()                   # warns once: a machine that restarts its window after each pause
-        made = dict(socket_options=window.socket_options(),
-                    limits=httpx.Limits(max_connections=1, max_keepalive_connections=1))
-        # bind: the network interface this connection leaves by, whatever the default route (network.bind)
-        transport = _bind.transport(httpx, bind, **made) if bind is not None else httpx.HTTPTransport(**made)
+        self._options = window.socket_options()
         self.bind = bind
         headers = dict(headers or {})
         if token is not None:
             headers["Authorization"] = f"Bearer {token}"
-        self._client = httpx.Client(base_url=url, transport=transport, timeout=timeout, headers=headers)
-        self._httpx, self._url, self._refused = httpx, url, httpx.ConnectError
+        self._httpx, self._url, self._refused, self._headers = httpx, url, httpx.ConnectError, headers
         self._act_path, self._ping_path = act_path, ping_path
         self._timeout, self._first_timeout = float(timeout), float(first_timeout)
+        self._client = self._connection()        # the link's own connection, kept KEPT_S while idle
         self._busy = threading.Lock()        # held by the request or the ping in flight: the connection carries one
         self._jpeg, self._compress = jpeg, compress
         self._reads: Optional[frozenset] = None          # what the server's latest X-Seq-Reads named; None: not heard
@@ -173,8 +232,19 @@ class Link:
         self._squeeze_for: Optional[frozenset] = None    # the codecs an automatic Squeeze was made for
         self._answered = False               # whether an act was answered: the first waits first_timeout
         self._stats = LatencyStats(counters=["acts", "pings", "pings_yielded", "acts_behind_ping", "pictures",
-                                             "unreachable_retries"],
+                                             "unreachable_retries", "acts_in_halves", "acts_whole_again"],
                                    latencies=["act_us", "ping_wait_us", "pack_us"])
+        # an act in two halves (split): the second connection, its own thread, the last thing sent on it (the GET that
+        # opened it, or a second half; None until the server says it joins halves), whether it has answered, and
+        # until when acts go whole after a half that did not reach the server
+        self._split = bool(split)
+        self._second = self._connection() if self._split else None
+        self._second_thread = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="sequence-ai-second") if self._split else None
+        self._second_sent: Optional[concurrent.futures.Future] = None
+        self._second_ready = False
+        self._whole_until = 0.0
+        self._mss: Optional[int] = None      # the connection's segment size, read from its socket (_learn)
         self._warm = window.Warm(self._ping, every_s=ping_every_s, for_s=ping_for_s) if ping_path else None
         # pings that yield to the robot's next act (_yields_now): when its last acts were sent, its last pings' round
         # trips, and when anything was last sent on the connection
@@ -188,6 +258,7 @@ class Link:
         self._act_starts: deque = deque(maxlen=YIELD_ACTS + 1)
         self._ping_trips: deque = deque(maxlen=YIELD_TRIPS)
         self._last_send: Optional[float] = None
+        self._restarted = False              # whether a ping since the last act restarted the window (_restarts_now)
         self._observed: Any = Link._NONE
         # the last act answered: the time its server says its model took (Server-Timing; None where it says none), and
         # the size of the request's body as sent
@@ -207,12 +278,16 @@ class Link:
         serve() is told once (with `check`): defaults that wait for the server's word stay off on it, and it may be
         another program at this address."""
         said, server = response.headers.get(READS_HEADER), response.headers.get(SERVER_HEADER)
+        if self._mss is None:
+            self._mss = _mss_of(response)
         if server is not None:
             name, _, version = server.partition("/")
             self.server = {**(self.server or {}), "server": name.strip(), "version": version.strip()}
         if said is None and not 200 <= response.status_code < 300:
             return
         self._reads = reads_of(said)
+        if self._split and SPLIT in self._reads:
+            self._open_second()              # opened now: an act goes in halves only once it has answered
         if self.sends_jpeg and not self._warmed:
             # Pillow and its JPEG encoder loaded now, on a thread of their own, not in the first act that sends a
             # picture: tens of milliseconds
@@ -266,6 +341,16 @@ class Link:
         return self._squeeze_now() is not None
 
     # ── the connection ────────────────────────────────────────────────────────────────────────────────────────────
+    def _connection(self) -> Any:
+        """A client of one connection to the server, kept KEPT_S while nothing is sent on it: window.socket_options() on
+        its socket, by the network interface `bind` names (network.bind) whatever the default route, with this link's
+        headers."""
+        httpx = self._httpx
+        made = dict(socket_options=self._options, limits=httpx.Limits(max_connections=1, max_keepalive_connections=1,
+                                                                      keepalive_expiry=KEPT_S))
+        transport = _bind.transport(httpx, self.bind, **made) if self.bind is not None else httpx.HTTPTransport(**made)
+        return httpx.Client(base_url=self._url, transport=transport, timeout=self._timeout, headers=self._headers)
+
     def _ping(self) -> bool:
         """The idle connection's ping (window.Warm calls it): sent, and True - or left out, and False, while a request
         is in flight or while it yields to the robot's next act (_yields_now)."""
@@ -288,6 +373,8 @@ class Link:
         """A ping sent on this connection at `began` and answered at `ended` (time.perf_counter()): the last thing sent,
         and one round trip more for the pings that may yield."""
         with self._timing:
+            if self._last_send is None or began > self._last_send:
+                self._restarted = self._restarted or self._past_deadline(began)
             self._last_send = began
             self._ping_trips.append(ended - began)
 
@@ -299,6 +386,7 @@ class Link:
         with self._timing:
             self._last_send = sent
             self._act_starts.append(asked)
+            self._restarted = False              # the act's own upload grows the window again
 
     def _yields_now(self) -> bool:
         """Whether the ping due now is left out for the robot's next act: an act that started while a ping was in flight
@@ -336,6 +424,87 @@ class Link:
             return True
         self._warm.check_in(late - now)                          # nothing for the ping to keep: it would meet the act
         return True
+
+    # ── an act in two halves ──────────────────────────────────────────────────────────────────────────────────────
+    def _open_second(self) -> None:
+        """The second connection opened, once: a GET at ping_path (act_path without one) on its own thread. Any answer
+        opens it; a failure leaves acts whole for WHOLE_AGAIN_S, then it is opened again (_splits_now)."""
+        with self._timing:
+            if self._second_sent is None:
+                self._second_sent = self._second_thread.submit(self._hello)
+
+    def _hello(self) -> None:
+        try:
+            self._second.get(self._ping_path or self._act_path)
+        except (self._httpx.TransportError, self._httpx.TimeoutException):
+            self._whole_until = time.monotonic() + WHOLE_AGAIN_S
+            return
+        self._second_ready = True
+
+    def _splits_now(self, size: int) -> bool:
+        """Whether an act of a `size`-byte body goes in two halves now (the module's docstring: `split`): the server
+        says it joins them; the body is more than this connection's first flight after a pause carries, and no more
+        than two; the window restarts at this send (_restarts_now); the second connection has answered and carries
+        nothing; and no half failed in the last WHOLE_AGAIN_S."""
+        flight = (FIRST_FLIGHT - 1) * (self._mss or MSS)
+        if (not self._split or not flight < size <= 2 * flight or SPLIT not in (self._reads or ())
+                or not self._restarts_now()):
+            return False
+        with self._timing:
+            last = self._second_sent
+            if last is None or not last.done():
+                return False                 # not opened yet, or its last half still on its way
+            if not self._second_ready or not self._reached(last):
+                self._second_ready = False
+                if time.monotonic() >= self._whole_until:
+                    self._second_sent = self._second_thread.submit(self._hello)    # opened again
+                return False
+            return time.monotonic() >= self._whole_until
+
+    def _restarts_now(self) -> bool:
+        """Whether the next act meets a restarted window on this connection: on a machine where a pause restarts it
+        (Linux without BBR), once a send since the last act - a ping, or this act - follows a silence past a ping's
+        round trip and RTO_FLOOR_S (_yields_now's deadline), or before anything was sent. A ping sent after the
+        silence restarts the window as the act would, and the act finds it at its start."""
+        if not self._window_at_stake:
+            return False
+        with self._timing:
+            return self._restarted or self._past_deadline(time.perf_counter())
+
+    def _past_deadline(self, at: float) -> bool:
+        """Whether a send at `at` follows a silence past the connection's deadline (_yields_now). With _timing held."""
+        trips = sorted(self._ping_trips)
+        trip = trips[len(trips) // 2] if trips else FIRST_TRIP_S
+        return self._last_send is None or at > self._last_send + trip + RTO_FLOOR_S
+
+    def _reached(self, sent: concurrent.futures.Future) -> bool:
+        """Whether what went on the second connection reached the server: an answer, and to a half, a success."""
+        if sent.exception() is not None:
+            self._whole_until = time.monotonic() + WHOLE_AGAIN_S
+            return False
+        response = sent.result()
+        if response is not None and not 200 <= response.status_code < 300:
+            self._whole_until = time.monotonic() + WHOLE_AGAIN_S
+            return False
+        return True
+
+    def _post_halves(self, path: str, body: bytes, timeout: Any, sent: dict) -> Any:
+        """The act in two halves at once (split), each on a connection of its own: the body's second half on the second
+        connection's thread, its first half here, on this link's connection, whose answer is the act's. Should the
+        server answer the first half HALF_MISSING - the second did not reach it - the act goes whole on this connection,
+        and the acts after it whole for WHOLE_AGAIN_S."""
+        cut = len(body) // 2
+        second = self._second_thread.submit(self._second.post, path, content=body[cut:], timeout=self._timeout,
+                                            headers={**sent, HALF_HEADER: "2/2"})
+        with self._timing:
+            self._second_sent = second
+        response = self._client.post(path, content=body[:cut], timeout=timeout, headers={**sent, HALF_HEADER: "1/2"})
+        self._stats.count("acts_in_halves")
+        if response.status_code != HALF_MISSING:
+            return response
+        self._stats.count("acts_whole_again")
+        self._whole_until = time.monotonic() + WHOLE_AGAIN_S
+        return self._client.post(path, content=body, timeout=timeout, headers=sent)
 
     def wait_until_ready(self, timeout_s: float = 600.0, *, poll_s: float = 0.5, example: Any = _NONE) -> None:
         """
@@ -443,31 +612,36 @@ class Link:
         the server's own, is kept as `last_carried_s`."""
         body, pictures, squeeze = packed
         sent = {"content-type": msgpack_io.MEDIA_TYPE}
-        if request_id is not None:
-            sent[REQUEST_HEADER] = request_id
+        halves = self._splits_now(len(body))
+        if request_id is not None or halves:     # the act its halves are joined into, by the server
+            sent[REQUEST_HEADER] = request_id or _request_id()
         first = not self._answered
         waits = max(self._timeout, self._first_timeout) if first else self._timeout
         timeout = self._httpx.Timeout(self._timeout, read=waits) if first else self._timeout
         queued_us, queued = now_us(), time.perf_counter()
-        response, started, took = self._post_once(path, body, timeout, sent, queued, waits)
+        response, started, took = self._post_once(path, body, timeout, sent, queued, waits, halves=halves)
         if response is None:                     # unreachable, and on_unreachable said to go once more
-            response, started, took = self._post_once(path, body, timeout, sent, queued, waits, again=True)
+            response, started, took = self._post_once(path, body, timeout, sent, queued, waits, halves=halves,
+                                                      again=True)
         if started - queued > 0.0005:            # it waited for a ping in flight on the connection
             self._stats.count("acts_behind_ping")
             self._stats.sample("ping_wait_us", (started - queued) * 1e6)
         return self._answered_with(response, body, pictures, squeeze, took, queued_us, note)
 
     def _post_once(self, path: Optional[str], body: bytes, timeout: Any, sent: dict, queued: float, waits: float, *,
-                   again: bool = False) -> "tuple[Any, float, float]":
-        """The act's request, sent once: (its response, when it was sent, how long it took) - the response None when it
-        could not reach the server and on_unreachable (not called yet for this act: `again` False) answered True. Every
-        other failure raises, as act() says."""
+                   halves: bool = False, again: bool = False) -> "tuple[Any, float, float]":
+        """The act's request, sent once - in two halves, with `halves` (_post_halves): (its response, when it was sent,
+        how long it took) - the response None when it could not reach the server and on_unreachable (not called yet
+        for this act: `again` False) answered True. Every other failure raises, as act() says."""
         unreached: Optional[BaseException] = None
         with self._busy:
             started = time.perf_counter()
             self._act_sent(queued, started)
             try:
-                response = self._client.post(path or self._act_path, content=body, timeout=timeout, headers=sent)
+                if halves:
+                    response = self._post_halves(path or self._act_path, body, timeout, sent)
+                else:
+                    response = self._client.post(path or self._act_path, content=body, timeout=timeout, headers=sent)
             except self._httpx.ReadTimeout as late:
                 # the server may still be running it, and the next act waits behind it: as long as a first one
                 self._answered = False
@@ -538,14 +712,18 @@ class Link:
         """The requests and pings so far and the latencies' p50, p95 and p99 (latency_stats.LatencyStats.snapshot):
         act_us from when act() queued each request to its response, ping_wait_us for those that waited behind a ping in
         flight (acts_behind_ping counts them), pack_us for building each request's body; pings_yielded, the pings left
-        out for the robot's next act (ping_yield)."""
+        out for the robot's next act (ping_yield); acts_in_halves, the acts sent in two halves (split), and
+        acts_whole_again, those of them sent whole again when the second half did not reach the server."""
         return self._stats.snapshot()
 
     def close(self) -> None:
-        """Stop the pings and close the connection."""
+        """Stop the pings and close the connections."""
         if self._warm is not None:
             self._warm.close()
         self._client.close()
+        if self._second is not None:
+            self._second_thread.shutdown(wait=False, cancel_futures=True)
+            self._second.close()
 
     def __enter__(self) -> "Link":
         return self
@@ -558,7 +736,7 @@ def connect(url: str, *, lines: Optional[Any] = None, **options: Any) -> Any:
     """A Link to the server at `url` (Link's options: act_path, ping_path, ping_every_s, ping_for_s, ping_yield,
     compress, jpeg, timeout, first_timeout, token, headers, check, bind - the network interface it leaves by,
     network.bind -, on_unreachable - called with the link when an act cannot reach the server: True, and the act goes
-    once more). With
+    once more -, split - an act in two halves on two connections when its window has restarted). With
     `lines` - network interfaces (["eth0", "wwan0"]), or {interface: address} where the server has another address by
     each - a network.lines.Lines: a connection by each, every act sent on each, the first answer used."""
     if lines is not None:

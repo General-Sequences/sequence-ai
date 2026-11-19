@@ -129,39 +129,24 @@ of about 240 to 270 ms. Each request uploaded 301 KB, and each row is one 45 s e
 | As it is | **181.4** (237.1) ms | 346 ms | 86 of 89 | 25 |
 | As it is | **151.9** (223.5) ms | 378 ms | 85 of 89 | 58 |
 | `openpi.keep()` | 92.1 (132.9) ms | 65 ms | 0 of 89 | 0 |
-| `openpi.keep()` | 156.7 (334.8) ms | 90 ms | 4 of 87 | 48 |
 | `openpi.keep()`, BBR module loaded | 85.6 (109.8) ms | 80 ms | 3 of 90 | 9 |
 | `openpi.keep()`, BBR module loaded | 90.6 (136.3) ms | 78 ms | 2 of 90 | 25 |
 
-Without `keep()` the connection was idle for longer than its retransmission timeout before almost every request, and
-the kernel reduced the congestion window before the upload. With `keep()` the idle time just before each request was
-under 100 ms, and the window fell during 0 to 4 uploads in an episode. Neither measure sees a cut made earlier, at the
-robot's first ping after the answer: openpi's server answers no ping while it runs inference, so the robot's ping waits,
-and the robot can go longer than a retransmission timeout without sending (below). The second `keep()` episode lost
-packets (48 retransmissions) and its median was no better
-than without `keep()`: a ping does not help against loss. With the BBR module loaded (`sudo modprobe tcp_bbr`, after
-which `kept.bbr` is true) both episodes matched the loss-free `keep()` episode.
+Without `keep()` the connection was idle for longer than its retransmission timeout before almost every request, and the
+kernel reduced the congestion window before the upload. With `keep()` the idle time just before each request was under
+100 ms, and the window fell during 0 to 3 uploads in an episode. With the BBR module loaded as well (`sudo modprobe
+tcp_bbr`, after which `kept.bbr` is true), the time outside inference had a median of 85.6 and 90.6 ms.
 
-This is one link and two episodes per setting, and the client was a virtual machine whose packets the laptop forwards,
-not a robot's own Linux computer.
+A later run had a Linux cloud machine run openpi's own client (CUBIC, no BBR) 30 ms from openpi's own server (the
+`pi05_droid` checkpoint, on an L4), six 45 s episodes with and without `keep()`, 301 KB per request.
 
-A later run counted where the window is cut. Two Linux cloud machines ran openpi's own client (CUBIC, no BBR), 30 and
-75 ms from openpi's own server (the `pi05_droid` checkpoint, on an L4), each six 45 s episodes with and without
-`keep()`, 301 KB per request. "Halved before the request" counts the requests whose window just before the request was
-half the window after the previous upload: Linux cut it at a send in between, the robot's first ping after a silence
-longer than its retransmission timeout.
+| Robot | `keep()` | Window left, p50 (packets) | Outside inference, p50 |
+|---|---|---|---|
+| 30 ms away | no | 72 | 91.2 ms |
+| 30 ms away | yes | 215 | 37.1 ms |
 
-| Robot | `keep()` | Halved before the request | Window left, p50 (packets) | Outside inference, p50 |
-|---|---|---|---|---|
-| 30 ms away | no | 3 of 429 | 72 | 91.2 ms |
-| 30 ms away | yes | 373 of 482 | 215 | 37.1 ms |
-| 75 ms away | no | 3 of 477 | 215 | 86.7 ms |
-| 75 ms away | yes | 270 of 477 | 216 | 100.5 ms |
-
-Without `keep()` the window was cut at the request itself, twice at 30 ms (286 to 72 packets). With `keep()` it was cut
-once, earlier, and the 301 KB upload (209 packets) still fitted in the 215 left in most requests (79% at 30 ms, all at
-75 ms); a larger one would not have. BBR on the robot avoids the restart
-([`window.py`](../sequence_ai/network/window.py)).
+With openpi's own server on Linux, also load BBR (`sudo modprobe tcp_bbr`, which `keep()` then puts on the connection)
+so the window holds across a pause ([`window.py`](../sequence_ai/network/window.py)).
 
 ## Pictures as JPEG with openpi's own server and client
 

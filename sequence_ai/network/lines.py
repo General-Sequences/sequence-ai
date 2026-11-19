@@ -42,18 +42,12 @@ from __future__ import annotations
 import concurrent.futures
 import threading
 import time
-import uuid
 from typing import Any, Optional, Sequence
 
 from .latency_stats import LatencyStats
-from .link import ONCE, Link
+from .link import ONCE, Link, _request_id
 
 __all__ = ["Lines", "connect", "same_server"]
-
-
-def _request_id() -> str:
-    """A new act's id: `r-` and 8 hex characters, as the platform's are (_core/rid.py)."""
-    return "r-" + uuid.uuid4().hex[:8]
 
 
 class Lines:

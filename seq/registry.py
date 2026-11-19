@@ -355,6 +355,7 @@ def _assemble_spec(cls: type, kw: dict[str, Any], bindings: dict[SeqFlags, str] 
         ("min_workers", "min_containers"), ("buffer_workers", "buffer_containers"), ("max_gpus", "max_gpus"),
         ("hz", "hz"), ("action_chunk_valid_len", "action_chunk_valid_len"),
         ("action_chunk_replan_at", "action_chunk_replan_at"), ("max_wait_for_batch", "max_wait_for_batch"),
+        ("robot", "robot"),
     ):
         if declared in kw:
             fields[field] = kw[declared]

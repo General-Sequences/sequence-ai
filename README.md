@@ -122,6 +122,10 @@ GPUs are in short supply, and few are near any given robot, which is why the sec
 [The platform guide](https://github.com/General-Sequences/sequence-ai/blob/main/platform.md) has the third: writing a policy class, deploying it, benchmarks and evals,
 teleoperation, and every `seq` command.
 
+An official template runs on all three: `seq serve` in the folder `seq init` made serves it on your own GPU or a
+rented one. Its weights download with a General Sequences key:
+[How do I run a template on my own GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-run-a-template-on-my-own-gpu.md)
+
 ## How it fits together
 
 ```
@@ -241,7 +245,7 @@ Combined, and for clients you may already use:
 
 | | Side | What it does | Requires |
 |---|---|---|---|
-| [`connect`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/link.py) | client | The client-side components on one connection to your own server, JPEG and compression while the server says it restores them. | httpx |
+| [`connect`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/link.py) | client | The client-side components on a kept connection to your own server: JPEG and compression while the server says it restores them, and an act whose window a pause restarted sent in two halves while the server joins them. | httpx |
 | [`lines`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/lines.py) | client | `connect(url, lines=["eth0", "wwan0"])`: each act sent over each of the robot's uplinks, each line bound to its own network interface, and the first answer used; `serve()` runs the policy once for the copies. [How](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-send-each-act-over-two-uplinks.md) | httpx; Linux 5.7 or later, or macOS |
 | [`check`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/check.py) | client | `python -m sequence_ai.check <url>`: which defaults are on between a robot and its server, and what the server is. | httpx |
 | [`openpi`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/openpi.py) | client | The client-side components on the connection held by openpi's own client. | openpi-client |
@@ -260,6 +264,18 @@ one, and [`examples/components/`](https://github.com/General-Sequences/sequence-
 [How do I run π0 (openpi) on a remote GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md) |
 [How do I reduce the latency of LeRobot remote inference?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-reduce-the-latency-of-lerobot-remote-inference.md)
 | [How do I serve a robot policy from my own GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md)
+
+## Language models
+
+`sequence_ai.chat()` and `Conversation` (an agent's history and its tool calls) take `server="openrouter"` with your
+own OpenRouter key, or the address of a server of your own with the OpenAI chat completions API:
+
+```python
+result_user = sequence_ai.chat("qwen/qwen3-8b", [{"role": "user", "content": "Plan the next step."}],
+                               server="openrouter")      # your key in OPENROUTER_API_KEY
+```
+
+[How do I use an LLM with my own OpenRouter key?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-use-an-llm-with-my-own-openrouter-key.md)
 
 ## Results
 
@@ -299,6 +315,7 @@ sequence_ai/
                    client: connect · window · compress · frames · wifi_power · openpi
                    server: one_write · ping · tcp_link · compressed
                    both:   msgpack_io · latency_stats · lerobot
+  chat/          chat() and Conversation: on General Sequences, or at a server of your own (server=)
   check.py       python -m sequence_ai.check: which defaults are on between a robot and its server
   ...            the client for General Sequences' GPUs and deployments: connect, gpu, teleop, record
 seq/             the seq command, and the decorators a hosted policy or benchmark is written with
@@ -324,6 +341,7 @@ About 4,500 lines in `sequence_ai/engine` and `sequence_ai/network`, and 202 tes
   - [`slack`: scheduling by the slack an action chunk leaves](https://github.com/General-Sequences/sequence-ai/blob/main/docs/slack.md)
 - Network layer
   - [How do I serve a robot policy from my own GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md)
+  - [How do I run a template on my own GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-run-a-template-on-my-own-gpu.md)
   - [How do I run π0 (openpi) on a remote GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md)
   - [How do I reduce the latency of LeRobot remote inference?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-reduce-the-latency-of-lerobot-remote-inference.md)
   - [Why does my robot's upload get slow after a pause?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/why-does-my-robots-upload-get-slow-after-a-pause.md)
@@ -332,6 +350,8 @@ About 4,500 lines in `sequence_ai/engine` and `sequence_ai/network`, and 202 tes
   - [What do the network components save, measured with the tools in this repository?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md)
   - [How do the components compare with openpi's remote inference and LeRobot's?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/comparison.md)
   - [What does each network component do?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/components.md)
+- Language models
+  - [How do I use an LLM with my own OpenRouter key?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-use-an-llm-with-my-own-openrouter-key.md)
 - General Sequences' GPUs
   - [How do I get a GPU near my robot?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-get-a-gpu-near-my-robot.md)
   - [The platform guide](https://github.com/General-Sequences/sequence-ai/blob/main/platform.md), with its references for [benchmarks and evals](https://github.com/General-Sequences/sequence-ai/blob/main/eval.md) and

@@ -54,8 +54,9 @@ DEFAULT_GB_PER_CORE = 2
 @dataclass
 class BenchmarkRegistration:
     """Everything an eval needs to run a benchmark, introspected from the decorated class: the wire `spec`, and the
-    parameters its constructor declares with a default beside what init= hands it (`params`, each with its type and
-    default, settable per eval as --param benchmark.NAME=VALUE). Everything else is read off the spec:
+    parameters its constructor declares with a default beside what init= hands it, and the one init= hands the
+    evaluated policy's arm, "{policy.robot}" (`params`, each with its type and default, settable per eval as --param
+    benchmark.NAME=VALUE). Everything else is read off the spec:
 
     - `bindings`: RESET / STEP → the method's name;
     - `constructor`: how its class is built after the machine's snapshot (init=), None for `cls()`;
@@ -277,7 +278,11 @@ def benchmark_request(cls: type, *, name: str | None = None,
 
         params=dict(reg.params) or None,
 
-        **({"driver": spec.driver} if spec.driver is not None else {}))
+        **({"driver": spec.driver} if spec.driver is not None else {}),
+
+
+
+        **({"constructor": spec.constructor} if spec.constructor is not None else {}))
 
 
 
@@ -377,20 +382,39 @@ def _init_params(cls: type, constructor: Any) -> dict[str, InferParam]:
     *, noise_std: float = 0.02)` with init={"worlds": "{num_worlds}"} - which an eval may set (`--param
     benchmark.noise_std=0`), every benchmark machine's constructor handed them. Its class's constructor as it is
     written: one of a type no --param sets keeps its default, set by nothing (keyword_params' loose). {} for a class
-    without a constructor of its own.
+    without a constructor of its own. A keyword init= hands the evaluated policy's arm, "{policy.robot}" alone, is one an
+    eval may set too (EVAL_SETS): the policy gives the arm it was made for, and an eval may run another (`--param
+    benchmark.robot=UR5e`, or several with `--sweep benchmark.robot=Panda,UR5e`).
+
 """
     from seq.params import keyword_params
 
     init = getattr(cls, "__init__", object.__init__)
     if init is object.__init__ or not inspect.isfunction(init):
         return {}
-    given = set(constructor.kwargs) if constructor is not None else set()
+    given = {name for name, value in (constructor.kwargs if constructor is not None else {}).items()
+             if not _an_evals_to_set(value)}
     if constructor is not None and constructor.args:
         positional = [p.name for p in list(inspect.signature(init).parameters.values())[1:]
                       if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)]
         given |= set(positional[:len(constructor.args)])
     return keyword_params(init, f"{cls.__name__}.__init__", BenchmarkDefinitionError, kind="benchmark parameter",
                           skip=frozenset(given), loose=True)
+
+
+
+
+
+EVAL_SETS = ("robot",)
+
+
+def _an_evals_to_set(value: Any) -> bool:
+    """Whether a value init= hands is "{policy.<field>}" alone of a field in EVAL_SETS - filled with the evaluated
+    policy's where the benchmark is built (sequence_base.construct), so an eval may set another in its place."""
+    from sequence_base.construct import FORMS
+
+    alone = FORMS.fullmatch(value) if isinstance(value, str) else None
+    return alone is not None and alone.group("field") in EVAL_SETS
 
 
 def _resolve_tasks(given: Any) -> dict[str, str]:

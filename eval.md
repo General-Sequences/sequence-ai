@@ -574,6 +574,11 @@ the values it set, and every benchmark machine's constructor is handed them. The
 their sources (`params: policy.replan_steps=5 (policy's default) · eval.max_seconds=20 (set)`) and how many steps asked
 the policy of all it took; `seq --json eval report` has them under `arm_params`.
 
+**The arm.** A benchmark that takes any arm says so with `init={"robot": "{policy.robot}"}`: an eval runs it on the
+arm the policy declares (`@seq.policy(robot="Panda")`), and `--param benchmark.robot=UR5e` or
+`--sweep benchmark.robot=Panda,UR5e` sets another. An arm the benchmark does not take is refused before anything is
+reserved, naming the arms it does.
+
 ## Billing, in one paragraph
 
 Billing is postpaid: you use first, and each month's usage is billed at its end. A non-dry-run eval holds the most it

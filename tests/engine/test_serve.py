@@ -84,7 +84,7 @@ def test_an_observation_in_and_the_policys_output_out_with_the_servers_time_and_
     assert out["note"] == "ok" and out["actions"].shape == (8, 7) and float(out["actions"][0, 0]) == 6.0
     # the time from the request's last byte to its response first: what connect() takes off the round trip
     assert re.fullmatch(r"act;dur=\d+\.\d, model;dur=\d+\.\d", headers["server-timing"]), headers["server-timing"]
-    assert headers["x-seq-reads"] == "jpeg, zstd, zlib, once"
+    assert headers["x-seq-reads"] == "jpeg, zstd, zlib, once, split"
 
 
 def test_what_the_server_says_it_reads_follows_its_switches():
@@ -96,9 +96,9 @@ def test_what_the_server_says_it_reads_follows_its_switches():
             app.close()
 
     # and, whatever the switches, that it runs an act's copies once (network.lines)
-    assert _run(go(jpeg=False)) == "zstd, zlib, once"
-    assert _run(go(compress=False)) == "jpeg, once"
-    assert _run(go(jpeg=False, compress=False)) == "once"
+    assert _run(go(jpeg=False)) == "zstd, zlib, once, split"
+    assert _run(go(compress=False)) == "jpeg, once, split"
+    assert _run(go(jpeg=False, compress=False)) == "once, split"
 
 
 def test_pictures_sent_as_jpeg_and_arrays_sent_compressed_reach_the_policy_as_the_arrays_they_were():
@@ -869,3 +869,190 @@ def test_an_answer_is_kept_for_its_copies_only_so_long(monkeypatch):
     first, later = _run(go())
     assert [msgpack_io.unpack(r[2])["n"] for r in (first, later)] == [1, 2]
     assert later[1].get("x-seq-request-copy") is None
+
+
+# ── an act's halves (HALF_HEADER): a robot's act in two halves, each on a connection of its own ───────────────────────
+def _half(n: int, rid: str = "r-0000abcd"):
+    return [("X-Seq-Request-Id", rid), ("X-Seq-Half", f"{n}/2")]
+
+
+@pytest.mark.parametrize("second_first", [False, True], ids=["first-half-first", "second-half-first"])
+def test_an_acts_two_halves_are_joined_in_either_order_and_run_once(second_first):
+    """The body's two halves reach the policy as the observation they make together, once, in whichever order they
+    come: the first half gets the answer, with the server's time from when the act was whole, and the second 202."""
+    calls: list = []
+
+    def policy(observation):
+        calls.append(observation)
+        return {"sum": int(observation["noise"].astype(np.int64).sum())}
+
+    noise = np.random.default_rng(1).integers(0, 256, 5000, dtype=np.uint8)
+    body = msgpack_io.pack({"noise": noise})
+    cut = len(body) // 2
+
+    async def go():
+        app = App(policy)
+        try:
+            def first():
+                return _request(app, "POST", "/act", body[:cut], headers=_half(1))
+
+            def second():
+                return _request(app, "POST", "/act", body[cut:], headers=_half(2))
+
+            if second_first:
+                got_second = await second()
+                return await first(), got_second
+            waiting = asyncio.ensure_future(first())
+            await asyncio.sleep(0.05)
+            assert not waiting.done()                       # the first half waits for the second
+            got_second = await second()
+            return await waiting, got_second
+        finally:
+            app.close()
+
+    first, second = _run(go())
+    assert first[0] == 200 and msgpack_io.unpack(first[2])["sum"] == int(noise.astype(np.int64).sum())
+    assert second[0] == 202 and second[2] == b""
+    assert len(calls) == 1 and np.array_equal(calls[0]["noise"], noise)
+    assert "split" in first[1]["x-seq-reads"].split(", ") and first[1].get("x-seq-request-copy") is None
+    assert re.fullmatch(r"act;dur=\d+\.\d, model;dur=\d+\.\d", first[1]["server-timing"])
+
+
+def test_a_first_half_whose_second_does_not_come_is_answered_424_and_the_act_runs_once_sent_whole(monkeypatch):
+    """Past HALF_WAIT_S the first half is answered 424 and nothing runs: the robot sends the act whole, and that runs it
+    once; a second half that comes after the wait finds nothing to join."""
+    monkeypatch.setattr(serving, "HALF_WAIT_S", 0.1)
+    calls: list = []
+    body = msgpack_io.pack({"state": np.ones(3)})
+
+    async def go():
+        app = App(lambda o: calls.append(1) or {"n": len(calls)})
+        try:
+            first = await _request(app, "POST", "/act", body[:5], headers=_half(1))
+            late = await _request(app, "POST", "/act", body[5:], headers=_half(2))
+            ran = len(calls)
+            return first, late, ran, await _request(app, "POST", "/act", body, headers=_rid())
+        finally:
+            app.close()
+
+    first, late, ran, whole = _run(go())
+    assert first[0] == 424 and b"send the act whole" in first[2] and late[0] == 202 and ran == 0
+    assert whole[0] == 200 and msgpack_io.unpack(whole[2])["n"] == 1 and len(calls) == 1
+
+
+def test_a_half_of_an_act_that_ran_whole_gets_its_answer_and_a_whole_copy_answers_a_first_half_waiting():
+    """network.lines may send one act whole over one uplink and in halves over another: whichever is whole first runs
+    it, once, and every half of it gets what it got, the first halves marked a copy."""
+    calls: list = []
+    body = msgpack_io.pack({"state": np.ones(3)})
+
+    async def go():
+        app = App(lambda o: calls.append(1) or {"n": len(calls)})
+        try:
+            whole = await _request(app, "POST", "/act", body, headers=_rid())
+            first = await _request(app, "POST", "/act", body[:5], headers=_half(1))
+            second = await _request(app, "POST", "/act", body[5:], headers=_half(2))
+            waiting = asyncio.ensure_future(_request(app, "POST", "/act", body[:5], headers=_half(1, "r-0000abce")))
+            await asyncio.sleep(0.05)
+            other = await _request(app, "POST", "/act", body, headers=_rid("r-0000abce"))
+            return whole, first, second, await waiting, other
+        finally:
+            app.close()
+
+    whole, first, second, woken, other = _run(go())
+    assert [msgpack_io.unpack(r[2])["n"] for r in (whole, first, woken, other)] == [1, 1, 2, 2] and len(calls) == 2
+    assert [r[1].get("x-seq-request-copy") for r in (whole, first, woken, other)] == [None, "1", "1", None]
+    assert second[0] == 202
+
+
+@pytest.mark.parametrize("headers", [[("X-Seq-Half", "1/2")], [("X-Seq-Request-Id", "r-0000abcd"), ("X-Seq-Half", "3/2")]],
+                         ids=["no-request-id", "not-a-half"])
+def test_a_half_with_no_act_or_no_half_named_is_a_400_that_says_so(headers):
+    async def go():
+        app = App(lambda o: {"n": 1})
+        try:
+            return await _request(app, "POST", "/act", b"\x80", headers=headers)
+        finally:
+            app.close()
+
+    status, _, said = _run(go())
+    assert status == 400 and b"X-Seq-Half is 1/2 or 2/2" in said
+
+
+def test_halves_that_together_are_over_the_limit_are_a_413():
+    async def go():
+        app = App(lambda o: {"n": 1}, limit=100)
+        try:
+            waiting = asyncio.ensure_future(_request(app, "POST", "/act", b"\x00" * 60, headers=_half(1)))
+            await asyncio.sleep(0.01)
+            await _request(app, "POST", "/act", b"\x00" * 60, headers=_half(2))
+            return await waiting
+        finally:
+            app.close()
+
+    status, _, said = _run(go())
+    assert status == 413 and b"halves are over this server's limit of 100 bytes" in said
+
+
+def test_halves_kept_are_let_go_past_their_wait_and_past_how_many_acts_may_wait(monkeypatch):
+    """Only the halves of the HALF_KEEP_N latest acts are kept, each HALF_WAIT_S at most: a robot that sends second halves
+    alone holds no more than that."""
+    monkeypatch.setattr(serving, "HALF_KEEP_N", 3)
+
+    async def go():
+        app = App(lambda o: {"n": 1})
+        try:
+            for i in range(5):
+                await _request(app, "POST", "/act", b"\x00", headers=_half(2, f"r-0000000{i}"))
+            kept = list(app._halves)
+            monkeypatch.setattr(serving, "HALF_WAIT_S", 0.0)
+            await asyncio.sleep(0.01)
+            await _request(app, "POST", "/act", b"\x00", headers=_half(2, "r-00000009"))
+            return kept, list(app._halves)
+        finally:
+            app.close()
+
+    kept, after = _run(go())
+    assert kept == [b"r-00000002", b"r-00000003", b"r-00000004"] and after == [b"r-00000009"]
+
+
+@pytest.fixture
+def serve_log(monkeypatch):
+    """The serve module's logger and the uvicorn and root loggers as a run leaves them, put back after the test."""
+    import logging
+
+    from sequence_ai.engine import serve as serve_module
+
+    shown = logging.Handler()
+    monkeypatch.setattr(logging.getLogger("uvicorn"), "handlers", [shown])
+    monkeypatch.setattr(serve_module.log, "handlers", [])
+    monkeypatch.setattr(logging.getLogger("sequence_ai"), "handlers", [])
+    monkeypatch.setattr(serve_module.log, "propagate", True)
+    monkeypatch.setattr(serve_module.log, "level", logging.NOTSET)
+    monkeypatch.setattr(logging.getLogger(), "handlers", list(logging.getLogger().handlers))
+    monkeypatch.setattr(logging.getLogger(), "level", logging.getLogger().level)
+    return serve_module, shown
+
+
+def test_the_ready_line_shows_when_a_library_set_the_root_logger_up_at_warning(serve_log):
+    import logging
+
+    serve_module, shown = serve_log
+    root = logging.getLogger()
+    root.addHandler(logging.NullHandler())
+    root.setLevel(logging.WARNING)                 # as absl leaves it, imported by a JAX policy
+    serve_module._log_with("info")
+    assert shown in serve_module.log.handlers and serve_module.log.propagate is False   # uvicorn's handler shows them
+    assert serve_module.log.isEnabledFor(logging.INFO)
+
+
+def test_a_program_that_shows_info_on_its_root_logger_keeps_the_lines_there(serve_log):
+    import logging
+
+    serve_module, _ = serve_log
+    root = logging.getLogger()
+    root.addHandler(logging.NullHandler())
+    root.setLevel(logging.INFO)
+    serve_module._log_with("info")
+    assert serve_module.log.handlers == [] and serve_module.log.propagate is True
+

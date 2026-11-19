@@ -15,11 +15,11 @@ uv run --with sequence-ai python -m sequence_ai.network.openpi scripts/serve_pol
 On the robot:
 
 ```python
-from openpi_client import websocket_client_policy
 from sequence_ai.network import openpi
 from sequence_ai.network.openpi import image_tools      # was: from openpi_client import image_tools
 
-policy_user = websocket_client_policy.WebsocketClientPolicy(host="YOUR_GPU", port=8000)
+# openpi_client's own WebsocketClientPolicy, made once the server answers: it waits while the server loads
+policy_user = openpi.connect("YOUR_GPU", 8000)
 # keeps the connection warm
 kept_user = openpi.keep(policy_user)
 observation_user["observation/exterior_image_1_left"] = image_tools.resize_with_pad(frame_user, 224, 224)  # now a JPEG
@@ -50,9 +50,9 @@ A robot that executes an action chunk before requesting the next one leaves its 
 Linux, a connection silent for longer than its retransmission timeout has its congestion window restarted, so the
 next observation can take more round trips to upload.
 [Why does my robot's upload get slow after a pause?](why-does-my-robots-upload-get-slow-after-a-pause.md) has the
-mechanism and the links where it did and did not cost anything. The pings keep the connection from going silent while
-the server can answer them; openpi's server answers none while it runs inference, so on a Linux robot without BBR the
-window can still be halved once before each upload ([measurements](measurements.md)). BBR on the robot avoids that.
+mechanism. The pings keep the connection from going silent while the server can answer them. With openpi's own server
+on Linux, also load BBR (`sudo modprobe tcp_bbr`, which `keep()` then puts on the connection) so the window holds
+across a pause ([measurements](measurements.md)).
 JPEG makes the upload itself smaller: two 224 x 224 pictures are 301,056 bytes as arrays.
 
 `kept.bbr` reports whether the socket accepted BBR, `kept.congestion` which congestion control it now uses, and
@@ -135,8 +135,8 @@ run-to-run noise; `jpeg=False` sends exact pixels.
   uploads. [What do the network components save?](measurements.md) has the table.
 - **Measured with openpi's own server and client:** one closed-loop run with π0.5 (`pi05_droid`) on an L4, the client in
   a Linux virtual machine on a home connection, 301 KB per request. The time a request spent outside inference had a
-  median of 181 and 152 ms in two episodes without `keep()`; with it, 92 ms in an episode without packet loss and 157 ms
-  in one that lost packets; with the BBR module loaded as well, 86 and 91 ms.
+  median of 181 and 152 ms in two episodes without `keep()`; with it, 92 ms; with the BBR module loaded as well, 86 and
+  91 ms.
   [The table](measurements.md#openpikeep-with-openpis-own-server-and-client) has the idle times and the congestion
   window.
 - **Measured with openpi's own server and client, the pictures as JPEG:** one closed-loop run with π0.5 on an L4, the
@@ -164,6 +164,11 @@ side by side.
 
 - `TypeError: this client keeps no WebSocket connection at _ws`: pass the `WebsocketClientPolicy` itself to
   `keep()`, not an `ActionChunkBroker` wrapped around it. Keep the broker for `infer()`.
+- `ConnectionClosedError: sent 1011 (internal error) keepalive ping timeout` on the robot's first `infer()`: openpi's
+  server answers no ping while its first inference compiles the model. `openpi.keep(policy)` keeps the connection
+  through it.
+- `TimeoutError: timed out while waiting for handshake response` as the robot connects: the server is loading its
+  policy, or compiling another robot's first inference. `openpi.connect(host, port)` waits for it.
 - `RuntimeError: Error in inference server:` on the robot, after its pictures went as JPEG: the server was started
   without `sequence_ai.network.openpi`, so its policy was handed the pictures as text. Start it with the command above,
   or import `image_tools` from `openpi_client` again.

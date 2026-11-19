@@ -180,3 +180,29 @@ def test_without_httpx_connect_raises_with_what_to_install(monkeypatch):
     monkeypatch.setitem(sys.modules, "httpx", None)    # as on a machine where it is not installed
     with pytest.raises(ImportError, match=r'pip install httpx'):
         connect("http://127.0.0.1:9", check=False)
+
+
+def test_a_robot_back_from_a_pause_past_its_pings_acts_on_the_connection_it_had():
+    """Each connection is kept link.KEPT_S while nothing is sent on it, where an HTTP client keeps 5 s: a robot that
+    pauses past its pings acts on the connection it had, with no new handshake - against serve() as it runs, whose own
+    keep is longer, so that the server never closes it as a request goes."""
+    from sequence_ai.engine.serve import KEEP_ALIVE_S, App
+    from sequence_ai.network.link import KEPT_S
+    from tests.engine.test_serve import _serving
+
+    ports: list = []
+
+    def recorded(app):
+        async def seen(scope, receive, send):
+            if scope["type"] == "http" and scope["path"] == "/act":
+                ports.append(scope["client"][1])               # the robot's port: a new one is a new connection
+            await app(scope, receive, send)
+        return seen
+
+    with _serving(recorded(App(lambda observation: {"n": 1}))) as url, \
+            connect(url, check=False, ping_for_s=0.2) as link:
+        link.act({"state": np.zeros(7, np.float32)})
+        time.sleep(5.5)                                         # past the pings, and an HTTP client's own 5 s
+        link.act({"state": np.ones(7, np.float32)})
+    assert len(ports) == 2 and ports[0] == ports[1]
+    assert 60.0 < KEPT_S < KEEP_ALIVE_S                          # past the pings' 60 s, under serve()'s keep
