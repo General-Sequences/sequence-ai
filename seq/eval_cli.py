@@ -86,16 +86,20 @@ def add_arguments(p_eval: argparse.ArgumentParser, p_report: argparse.ArgumentPa
 
 
 def parse_value(text: str) -> int | float | bool | str:
-    """A parameter value as typed: true/false, an int, a float, else the text itself (the worker casts it to the
-    declared type and refuses what does not fit)."""
+    """A parameter value as typed: true/false, a number whose own text it is (`3`, `0.5`, `1e-05`), else the text
+    itself - `1.10`, `1e3` and `007` sent as typed, so a str parameter runs with what was typed and a number's is read
+    from it, where a number sent in their place ran as "1.1", "1000.0" and "7". The platform casts each to the declared
+    type and refuses what does not fit.
+"""
     low = text.strip().lower()
     if low in ("true", "false"):
         return low == "true"
     for cast in (int, float):
         try:
-            return cast(text)
+            number = cast(text)
         except ValueError:
-            pass
+            continue
+        return number if repr(number) == text.strip() else text
     return text
 
 
@@ -117,7 +121,8 @@ def parse_param(text: str) -> tuple[str, int | float | bool | str]:
 
 def parse_sweep(text: str) -> tuple[str, list]:
     name, value = parse_param(text)
-    values = [parse_value(v) for v in str(text.partition("=")[2]).split(",") if v.strip()]
+
+    values = [parse_value(v.strip()) for v in str(text.partition("=")[2]).split(",") if v.strip()]
     if len(values) < 2:
         raise ValueError(f"{text!r}: a sweep needs at least two values (NAME=V1,V2)")
     return name, values

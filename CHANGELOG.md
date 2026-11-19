@@ -3,6 +3,20 @@
 What changed in each release of `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
+## 0.64.1 — 2026-11-19
+
+A benchmark that types a setting no eval can set is refused when you deploy it, and a `--param` value reaches a text
+parameter as you typed it.
+
+### Changed
+
+- `seq deploy` refuses a benchmark whose constructor types a setting no eval can set, such as
+  `scale: float | str | None`, and says how to type it.
+
+### Fixed
+
+- `--param benchmark.scale=1.10` reaches a `str` parameter as `"1.10"`, as typed, not as `"1.1"`.
+
 ## 0.64.0 — 2026-11-19
 
 A template's policy runs on your own GPU, `chat()` takes your own OpenRouter key, a policy names its robot arm, and an

@@ -563,6 +563,10 @@ class MyBench_user:
                                                                           # it is the platform's)
 ```
 
+A benchmark's constructor keyword typed as a setting no eval can set is refused when you register it, saying how to type
+it: `scale: float | str | None` as `scale: str | None`, `steps: int = "auto"` as `steps: str`. One untyped, or typed as
+nothing a `--param` could be (a `dict`, a class of your own), keeps its default, and `seq deploy` warns of a typed one.
+
 The eval has one of its own, `eval.max_seconds`: how long an episode may run on the robot's clock, the benchmark's
 `max_seconds` unless it is set. Set any of them for the whole eval with `--param side.name=value` — the bare name works
 when only one side declares it, so `--param replan_steps=3` still does — and sweep any of them with `--sweep` (every

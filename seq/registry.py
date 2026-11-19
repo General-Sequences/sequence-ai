@@ -642,17 +642,18 @@ def plan_layout(gpu: Any) -> str | None:
     return None
 
 
-def infer_params(cls: type) -> dict[str, InferParam]:
+def infer_params(cls: type, left: list[str] | None = None) -> dict[str, InferParam]:
     """The inference parameters a policy declares - its @seq.infer's and its @seq.observe's - `def infer(self, obs, *,
     seed=None, replan_steps: int = 5)` declares `replan_steps` - each with its type (the annotation, else its
     default's) and default. The deployment's defaults (`seq policy set`) or an eval may set them, never an act, which
     carries none; the worker passes each method only the ones it takes, cast to their type. The same rules as an
     adapter's and a benchmark's (seq/params.py). A method that takes its inputs by name declares none: each of its
     arguments is a key of the inputs; one that takes them whole declares those of its arguments with a default that can
-    be one, the others keeping their defaults. A name both declare is declared the same by both, or refused.
+    be one, the others keeping their defaults - those of them typed added to `left` as written, for `seq deploy` to say
+    (keyword_params). A name both declare is declared the same by both, or refused.
     
 """
-    declared = _infer_params(cls)
+    declared = _infer_params(cls, left)
     reg = registration(cls)
     observe = reg.bindings.get(SeqFlags.OBSERVE)
     if observe is None:
@@ -662,7 +663,7 @@ def infer_params(cls: type) -> dict[str, InferParam]:
     if named.inputs_by_name(cls, "observe", observe) is not None:
         return declared
     seen = keyword_params(hook(cls, observe), f"{cls.__name__}.{observe}", PolicyDefinitionError,
-                          kind="inference parameter", skip=OBSERVE_PLATFORM, skip_first=True, loose=True)
+                          kind="inference parameter", skip=OBSERVE_PLATFORM, skip_first=True, loose=True, left=left)
     for name, param in seen.items():
         if name in declared and declared[name] != param:
             raise PolicyDefinitionError(
@@ -673,7 +674,7 @@ def infer_params(cls: type) -> dict[str, InferParam]:
     return {**declared, **seen}
 
 
-def _infer_params(cls: type) -> dict[str, InferParam]:
+def _infer_params(cls: type, left: list[str] | None = None) -> dict[str, InferParam]:
     """What its @seq.infer declares (infer_params)."""
     from seq.params import keyword_params
 
@@ -688,7 +689,8 @@ def _infer_params(cls: type) -> dict[str, InferParam]:
 
 
     return keyword_params(hook(cls, name), f"{cls.__name__}.{name}", PolicyDefinitionError,
-                          kind="inference parameter", skip=INFER_PLATFORM, skip_first=takes_input, loose=True)
+                          kind="inference parameter", skip=INFER_PLATFORM, skip_first=takes_input, loose=True,
+                          left=left)
 
 
 def _handler_ref(cls: type, applied: tuple[str, dict] | None = None) -> str:

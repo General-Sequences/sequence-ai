@@ -858,6 +858,12 @@ def _cmd_deploy(args: argparse.Namespace) -> int:
         step = per_step(cls)
         if step:
             print(f"warning: {step}", file=sys.stderr)
+
+    from seq.deploy_cli import not_params_warning
+
+    unset = not_params_warning(kind, cls)
+    if unset:
+        print(f"warning: {unset}", file=sys.stderr)
     if args.dry_run:
         if args.json:
             if kind == "policy":

@@ -457,6 +457,32 @@ def request_check(request: Any, *, base_url: str | None) -> None:
         return
 
 
+def not_params_warning(kind: str, cls: Any) -> str | None:
+    """What `seq deploy` and its --dry-run warn of a policy or a benchmark that types a parameter no eval can set
+    (seq.params.keyword_params' left): it keeps its default, set by nothing - None when it types none such.
+    
+"""
+    if kind == "benchmark":
+        from seq.benchmark_registry import benchmark_registration
+
+        left, side, where = list(benchmark_registration(cls).left), "benchmark", f"{cls.__name__}.__init__"
+    else:
+        from seq.registry import infer_params
+
+        left, side, where = [], "policy", cls.__name__
+        infer_params(cls, left)
+    left = list(dict.fromkeys(left))
+    if not left:
+        return None
+    one = len(left) == 1
+    named = left[0] if one else ", ".join(left[:-1]) + " and " + left[-1]
+    it, keeps = ("it", "it keeps") if one else ("them", "each keeps")
+    name = left[0].split(":")[0] if one else "NAME"
+    return (f"{where} types {named}, which no eval can set: an eval sets a parameter typed int, float, bool, str or "
+            f"list[float] (or one of those | None) whose default is of that type, so {keeps} its default - type {it} "
+            f"as one of those to set {it} with --param {side}.{name}=VALUE")
+
+
 def platform_line(verdict: dict | None) -> str:
     """The line `seq deploy --dry-run` prints about the platform's check."""
     if verdict is None:
