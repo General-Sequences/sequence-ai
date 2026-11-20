@@ -20,7 +20,9 @@ async with websockets.serve(handler_user, host_user, port_user, **ping.websocket
 ```
 
 openpi's own policy server is built on the `websockets` library. Started through `python -m sequence_ai.network.openpi`,
-it pings each connection the same way, with no change to its files:
+it pings each connection every 100 ms as well, with no change to its files, except while an inference runs: it runs its
+policy on its event loop, which sends and answers no ping until the inference is done, so it waits for each pong as
+long as that takes rather than 20 s:
 [How do I run π0 (openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md)
 
 Under uvicorn:
@@ -99,12 +101,15 @@ A window that the pings do not fill still shrinks. BBR on the robot keeps that o
 ## When the server cannot ping
 
 **A plain HTTP server.** A server that answers one HTTP request with one response has no way to send anything
-unsolicited. There the ping comes from the robot. `connect()` does it by itself:
+unsolicited. There the ping comes from the robot, on the connection your client holds:
 
 ```python
-from sequence_ai.network import connect
+import httpx
+from sequence_ai.network import window
 
-link_user = connect("http://YOUR_GPU:8000")     # a small GET after each 100 ms of idle time
+client_user = httpx.Client(base_url="http://YOUR_GPU:8000")
+warm_user = window.Warm(ping=lambda: client_user.get("/ping"))     # a small GET after each 100 ms of idle time
+warm_user.used()                                                   # call it each time you send on the connection
 ```
 
 **A WebSocket server you cannot change.** Ping from the client side, on the connection your client already holds.

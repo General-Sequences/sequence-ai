@@ -20,8 +20,8 @@ The last line it prints:
 Successfully installed annotated-types-0.8.0 anyio-4.16.0 certifi-2026.10.23 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 idna-3.20 pillow-13.0.0 pydantic-2.14.3 pydantic-core-2.50.4 sequence-ai-0.62.0 sequence-base-0.8.12 typing-extensions-4.16.0 typing-inspection-0.4.5
 ```
 
-The inference components import only the standard library. `cuda_graphs` operates on a torch model, and uses the torch
-your model already has.
+The inference components import only the standard library. `optimize` operates on a torch model, or a JAX one, and
+uses the torch or JAX your model already has.
 
 ## 2. Run five robots against one model
 
@@ -104,22 +104,22 @@ a real model depends on where the model spends its time:
 ## Then: a faster forward pass, with the same outputs
 
 If your model is a PyTorch model that calls one module many times per run (a diffusion or flow policy's denoiser),
-one more call replays that module from CUDA graphs. With torch installed:
+one more call, `optimize()`, replays that module from CUDA graphs. With torch installed:
 
 ```bash
 python examples/graph_a_module.py
 ```
 
-On a machine with no CUDA GPU it finds the module, leaves the model unchanged, and prints:
+On a machine with no CUDA GPU it leaves the model unchanged, and prints:
 
 ```text
-candidates: [{'path': 'denoiser', 'calls': 10, 'ms': 1.05}]
-cuda graphs: no CUDA GPU available: nothing captured
+cuda_graphs: off - this machine has no CUDA GPU
+whole_graph: off - this machine has no CUDA GPU
 same outputs, byte for byte: True
-eager 1.14 ms per run; no CUDA GPU available, so nothing was graphed
 ```
 
-On a GPU it captures the module, checks the output against eager mode's byte for byte, and prints both timings. [How do
+On a GPU it captures the module, checks the outputs against eager mode's byte for byte, keeps what is faster, and
+prints the act before and after. [How do
 I make a PyTorch robot policy faster without changing its
 outputs?](how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
 

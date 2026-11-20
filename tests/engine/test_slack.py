@@ -316,12 +316,13 @@ def test_two_models_keep_the_two_robots_that_were_in_time_on_a_gpu(forward):
     assert slack.per_replica(table, PACED_BUFFER_MS, sizes=sizes, outside_ms=20.0, cycle_ms=PACED_CYCLE_MS) == 2
 
 
-def test_robots_late_in_under_a_twentieth_of_their_responses_are_within_capacity_and_over_it_are_not():
+def test_asked_for_a_share_robots_late_in_under_a_twentieth_of_their_responses_are_in_time_and_over_it_are_not():
     """π0.5 on an L4 (batches of 1, 2 and 3 in 195, 312 and 429 ms), a 15 Hz policy. Two robots 100 ms away have a late
     response only while their requests fall 5 to 25 ms apart, the second too late to share the first one's batch: 5
-    starts of 64, and 3.9% of the responses over the starts. That is within what IN_TIME_MIN leaves, so the two are in
-    time and the capacity is 2; two such robots on the GPU had no late response in 225. The same two 120 ms away have
-    8.6% late over the starts, at the same load, and are not in time."""
+    starts of 64, and 3.9% of the responses over the starts. Asked for a share (worst False), that is within what
+    IN_TIME_MIN leaves, so the two are in time and the capacity is 2; two such robots on the GPU had no late response in
+    225. By default, which no start may be late in, the capacity is 1. The same two 120 ms away have 8.6% late over the
+    starts, at the same load, and are not in time either way."""
     table, sizes = _timed({1: 195.0, 2: 312.0, 3: 429.0}), [1, 2, 3]
     cycle = AT_15["play_s"] - AT_15["buffer_s"]
 
@@ -333,14 +334,38 @@ def test_robots_late_in_under_a_twentieth_of_their_responses_are_within_capacity
 
     share, starts_late, load = late_share(100.0)
     assert share == pytest.approx(0.039, abs=0.002) and starts_late == 5 and load <= slack.LOAD_MAX
-    assert 0.0 < share <= 1.0 - slack.IN_TIME_MIN and slack.in_time(table, AT_15, [100.0, 100.0], sizes=sizes)
-    assert slack.per_replica(table, PACED_BUFFER_MS, sizes=sizes, outside_ms=100.0, cycle_ms=PACED_CYCLE_MS) == 2
+    assert 0.0 < share <= 1.0 - slack.IN_TIME_MIN
+    assert slack.in_time(table, AT_15, [100.0, 100.0], sizes=sizes, worst=False)
+    assert not slack.in_time(table, AT_15, [100.0, 100.0], sizes=sizes)
+    paced = dict(sizes=sizes, outside_ms=100.0, cycle_ms=PACED_CYCLE_MS)
+    assert slack.per_replica(table, PACED_BUFFER_MS, **paced, worst=False) == 2
+    assert slack.per_replica(table, PACED_BUFFER_MS, **paced) == 1
     share, _, load = late_share(120.0)
     assert share == pytest.approx(0.086, abs=0.002) and load <= slack.LOAD_MAX
-    assert not slack.in_time(table, AT_15, [120.0, 120.0], sizes=sizes)
+    assert not slack.in_time(table, AT_15, [120.0, 120.0], sizes=sizes, worst=False)
     for gap_ms, late in ((0, False), (4, False), (5, True), (25, True), (26, False), (150, False)):
         got, _, _ = slack.on_a_clock(table, AT_15, [100.0, 100.0], [0.0, gap_ms / 1000.0], sizes=sizes)
         assert (got > 0) == late, gap_ms
+
+
+def test_two_robots_late_in_a_few_starts_alone_are_one_robot_seated_by_default_and_two_asked_for_a_share():
+    """Two robots on one machine, 54 ms from a server whose batches of 1 and 2 took 235 and 304 ms (15 Hz, a 467 ms
+    buffer), run three times for 25 s with their first requests 60 ms apart: the second was late in 64%, 95% and 3% of
+    its answers - on one machine's clock their phases do not drift, and the start they began in decides. On the clock,
+    from that start half the second one's responses are late, and 2.3% of the responses over all the starts, 3 of 64
+    of them with a late one. By default no start may be late: one is seated and the other is over; asked for a share,
+    both are seated."""
+    table, sizes = _timed({1: 235.0, 2: 304.0}), [1, 2]
+    late, total, _ = slack.on_a_clock(table, AT_15, [54.0, 54.0], [0.0, 0.060], sizes=sizes, cycles=40)
+    assert (late, total) == (32, 64)
+    runs = [slack.on_a_clock(table, AT_15, [54.0, 54.0], begin, sizes=sizes, early=True)
+            for begin in slack.starts(2, PACED_CYCLE_MS / 1000.0)]
+    assert sum(late / total for late, total, _ in runs) / len(runs) == pytest.approx(0.0234, abs=0.001)
+    assert sum(late > 0 for late, _, _ in runs) == 3
+    two = {"a": 54.0, "b": 54.0}
+    paced = dict(sizes=sizes, outsides=two, cycle_ms=PACED_CYCLE_MS)
+    assert _seat(table, PACED_BUFFER_MS, **paced) == (1, ["b"])
+    assert _seat(table, PACED_BUFFER_MS, **paced, worst=False) == (2, [])
 
 
 def test_a_request_sent_late_is_due_when_the_chunk_before_it_runs_out():
@@ -412,21 +437,22 @@ def test_the_clock_rounds_an_rtt_up_to_ten_ms_and_takes_the_default_for_none():
     assert [slack._far(ms) for ms in (None, 0.0, 9.0, 20.0, 21.0, 47.0, 100.0)] == [100, 0, 10, 20, 30, 50, 100]
 
 
-def _every_start(table, play, trips, sizes) -> bool:
-    """in_time's verdict by running every start: at least IN_TIME_MIN of the responses in time, each start counting
-    the same, and no start's load above LOAD_MAX."""
+def _every_start(table, play, trips, sizes, worst=True) -> bool:
+    """in_time's verdict by running every start: no response late in any of them (`worst` False: at least IN_TIME_MIN
+    of the responses in time, each start counting the same), and no start's load above LOAD_MAX."""
     runs = [slack.on_a_clock(table, play, trips, begin, sizes=sizes, early=True)
             for begin in slack.starts(len(trips), play["play_s"] - play["buffer_s"])]
     late = sum(late / total for late, total, _ in runs if total)
-    return (late <= (1.0 - slack.IN_TIME_MIN) * len(runs) + 1e-9
-            and all(load <= slack.LOAD_MAX + 1e-9 for _, _, load in runs))
+    in_time = not any(late for late, _, _ in runs) if worst else late <= (1.0 - slack.IN_TIME_MIN) * len(runs) + 1e-9
+    return in_time and all(load <= slack.LOAD_MAX + 1e-9 for _, _, load in runs)
 
 
 def test_a_verdict_stops_at_the_start_that_decides_it_and_is_the_verdict_of_every_start(monkeypatch):
-    """in_time stops running starts once its verdict cannot change. Not in time: at the first start that makes too many
-    responses late, or whose load is above LOAD_MAX. In time: once the starts left could all be late without making
-    too many, 3 starts of 64 and 6 of 128, where the robots' batches cannot fill a cycle above LOAD_MAX however their
-    requests fall. Over 5 timing tables, 3 RTTs and 2 to 5 robots, the verdict is that of running every start."""
+    """in_time stops running starts once its verdict cannot change. Not in time: at the first start with a late
+    response (asked for a share: that makes too many late), or whose load is above LOAD_MAX. In time: after every start
+    by default; asked for a share, once the starts left could all be late without making too many, 3 starts of 64 and 6
+    of 128, where the robots' batches cannot fill a cycle above LOAD_MAX however their requests fall. Over 5 timing
+    tables, 3 RTTs and 2 to 5 robots, either way, the verdict is that of running every start."""
     runs, run = [], slack.on_a_clock
 
     def counted(*args, **kwargs):
@@ -440,24 +466,30 @@ def test_a_verdict_stops_at_the_start_that_decides_it_and_is_the_verdict_of_ever
         table, sizes = _timed(forward), sorted(forward)
         for trip in (20.0, 60.0, 100.0):
             for robots in range(2, min(5, sizes[-1]) + 1):
-                want = _every_start(table, AT_15, [trip] * robots, sizes)
-                slack._CLOCKED.clear()
-                if slack.in_time(table, AT_15, [trip] * robots, sizes=sizes) != want:
-                    differ.append((forward, trip, robots, want))
+                for worst in (True, False):
+                    want = _every_start(table, AT_15, [trip] * robots, sizes, worst)
+                    slack._CLOCKED.clear()
+                    if slack.in_time(table, AT_15, [trip] * robots, sizes=sizes, worst=worst) != want:
+                        differ.append((forward, trip, robots, worst, want))
     assert not differ, differ
     monkeypatch.setattr(slack, "on_a_clock", counted)
     slack._CLOCKED.clear()
     pi05 = _timed({1: 195.0, 2: 312.0, 3: 429.0})
-    assert slack.in_time(pi05, AT_15, [20.0, 20.0], sizes=[1, 2, 3]) and len(runs) == 64 - 3     # none late: 61 run
+    assert slack.in_time(pi05, AT_15, [20.0, 20.0], sizes=[1, 2, 3], worst=False) and len(runs) == 64 - 3   # 61 run
     runs.clear()
-    assert slack.in_time(_timed(SMALL_MS), AT_15, [20.0] * 3, sizes=sorted(SMALL_MS)) and len(runs) == 128 - 6
+    assert slack.in_time(pi05, AT_15, [20.0, 20.0], sizes=[1, 2, 3]) and len(runs) == 64       # every start, none late
+    runs.clear()
+    small = _timed(SMALL_MS)
+    assert slack.in_time(small, AT_15, [20.0] * 3, sizes=sorted(SMALL_MS), worst=False) and len(runs) == 128 - 6
     runs.clear()
     assert not slack.in_time(_timed(SLOW_MS), AT_15, [20.0, 20.0], sizes=sorted(SLOW_MS)) and len(runs) < 64
     runs.clear()
     # two batches of one can fill 0.96 of a cycle: a start left unrun could be above LOAD_MAX, so every one is run
     slower = _timed({1: 256.0, 2: 262.0})
     assert slack._most_load(slower, 2, PACED_CYCLE_MS / 1000.0, [1, 2]) > slack.LOAD_MAX
-    assert slack.in_time(slower, AT_15, [20.0, 20.0], sizes=[1, 2]) == _every_start(slower, AT_15, [20.0, 20.0], [1, 2])
+    for worst in (True, False):
+        assert slack.in_time(slower, AT_15, [20.0, 20.0], sizes=[1, 2], worst=worst) == _every_start(
+            slower, AT_15, [20.0, 20.0], [1, 2], worst)
 
 
 def test_a_verdict_is_kept_at_the_clocks_resolution_and_run_once():
@@ -474,11 +506,46 @@ def test_a_verdict_is_kept_at_the_clocks_resolution_and_run_once():
     assert not slack.in_time(table, AT_15, [20.0, 21.0], sizes=sizes) and len(slack._CLOCKED) == 2
 
 
+def test_asked_for_kept_verdicts_only_in_time_answers_those_and_runs_nothing_for_the_rest():
+    """Within kept_only, a question with a verdict kept is answered, and one with none raises NotKept and runs no clock;
+    outside it, as on another thread, the clock runs as ever. A server asks this way on the loop that answers its
+    robots, and has a thread run what is missing."""
+    table, sizes = _timed(SLOW_MS), sorted(SLOW_MS)
+    slack._CLOCKED.clear()
+    with slack.kept_only():
+        with pytest.raises(slack.NotKept):
+            slack.in_time(table, AT_15, [20.0, 20.0], sizes=sizes)
+    assert slack._CLOCKED == {}                                         # nothing was run for it
+    assert not slack.in_time(table, AT_15, [20.0, 20.0], sizes=sizes)   # run here, and kept
+    seen = []
+    with slack.kept_only():
+        assert not slack.in_time(table, AT_15, [20.0, 20.0], sizes=sizes)
+        with slack.kept_only():
+            pass                                                        # a nested one leaves the outer one asking
+        with pytest.raises(slack.NotKept):
+            slack.in_time(table, AT_15, [20.0, 100.0], sizes=sizes)
+        thread = __import__("threading").Thread(
+            target=lambda: seen.append(slack.in_time(table, AT_15, [20.0, 100.0], sizes=sizes)))
+        thread.start()
+        thread.join()                                                   # another thread asks as ever
+    assert seen == [False] and len(slack._CLOCKED) == 2
+
+
+def test_a_tables_gpu_memory_is_reported_and_taken_with_its_runs():
+    table = _timed({1: 80.0, 2: 110.0})
+    table.vram_mb[2] = 9216
+    assert table.as_dict() == {"1": {"p50": 80.0, "p95": 80.0, "n": 3},
+                               "2": {"p50": 110.0, "p95": 110.0, "n": 3, "vram_mb": 9216}}
+    other = slack.Table()
+    other.take(table)
+    assert other.vram_mb == {2: 9216} and other.vram_mb is not table.vram_mb
+
+
 # ── one replica, each robot by its own RTT ───────────────────────────────────────────────────────────────────────────
 
-def _seat(table, buffer_ms, *, sizes, outsides=None, cycle_ms=None, most=slack.MAX_ROBOTS_PER_REPLICA):
+def _seat(table, buffer_ms, *, sizes, outsides=None, cycle_ms=None, most=slack.MAX_ROBOTS_PER_REPLICA, worst=True):
     """One replica's capacity with the robots on it now (slack.Seating.seat): (seats, over)."""
-    seating = slack.Seating(table, buffer_ms, sizes=sizes, cycle_ms=cycle_ms, most=most)
+    seating = slack.Seating(table, buffer_ms, sizes=sizes, cycle_ms=cycle_ms, most=most, worst=worst)
     return seating.seat(list((outsides or {}).items()))
 
 
@@ -545,22 +612,24 @@ def test_a_robot_late_even_alone_is_over_beside_others_and_seated_alone():
     assert _seats({"late": 300.0}) == (2, [])
 
 
-@pytest.mark.parametrize("forward, outsides, seated", [
+@pytest.mark.parametrize("forward, outsides, seated, shared", [
     # the far one's request, come as the near ones' batch of two runs (120 ms), would leave 43 ms late: the near two
     # keep their places, with one more for a robot at ROUND_TRIP_MS
-    ({1: 100.0, 2: 120.0, 3: 140.0}, {"N1": 40.0, "N2": 40.0, "F": 300.0}, (3, ["F"])),
+    ({1: 100.0, 2: 120.0, 3: 140.0}, {"N1": 40.0, "N2": 40.0, "F": 300.0}, (3, ["F"]), (3, ["F"])),
     # the near ones' requests, come as the far one's batch runs (100 ms), would leave 3 and 103 ms late. 280 ms away,
-    # the two near ones keep their places: on a clock 98.4% of their responses are back in time (one is late in 2
-    # starts of 64, where its request arrives as the other's batch of one runs)
-    ({1: 100.0, 2: 130.0, 3: 150.0}, {"N1": 280.0, "N2": 280.0, "F": 310.0}, (2, ["F"])),
+    # one near one is late in 2 starts of 64, where its request arrives as the other's batch of one runs: in every
+    # start one of them keeps its place; asked for a share, the two do (98.4% of their responses back in time)
+    ({1: 100.0, 2: 130.0, 3: 150.0}, {"N1": 280.0, "N2": 280.0, "F": 310.0}, (1, ["N2", "F"]), (2, ["F"])),
 ])
-def test_a_batch_of_one_fit_is_in_time_behind_another_fits_batch_or_the_furthest_moves(forward, outsides, seated):
+def test_a_batch_of_one_fit_is_in_time_behind_another_fits_batch_or_the_furthest_moves(forward, outsides, seated,
+                                                                                        shared):
     """A replica runs one batch at a time, and a robot of one fit is not held for another's, so a request may come as
     another fit's batch runs: each fit's batch + the longest of another's + its furthest robot's RTT + MARGIN_MS
     must be within the buffer (15 Hz, 467 ms of buffer, sizes 1 to 3). Seated by the fits alone, a replica held all
     three and a request came late. The furthest is the one over; alone it is in time."""
     table, sizes = _timed(forward), sorted(forward)
     assert _seat(table, PACED_BUFFER_MS, sizes=sizes, outsides=outsides, cycle_ms=PACED_CYCLE_MS) == seated
+    assert _seat(table, PACED_BUFFER_MS, sizes=sizes, outsides=outsides, cycle_ms=PACED_CYCLE_MS, worst=False) == shared
     assert _seat(table, PACED_BUFFER_MS, sizes=sizes, outsides={"F": outsides["F"]}, cycle_ms=PACED_CYCLE_MS)[1] == []
 
 
@@ -1167,25 +1236,45 @@ def _spread(lat: dict) -> slack.Table:
     return table
 
 
-def _seating(table: slack.Table, play: dict, sizes: list) -> slack.Seating:
+def _seating(table: slack.Table, play: dict, sizes: list, worst: bool = True) -> slack.Seating:
     """A replica's Seating from a policy's playback, with no more robots than its largest listed size."""
     wait = play.get("wait_s")
     return slack.Seating(table, play["buffer_s"] * 1000.0, sizes=sizes,
-                         cycle_ms=(play["play_s"] - play["buffer_s"]) * 1000.0, most=sizes[-1],
+                         cycle_ms=(play["play_s"] - play["buffer_s"]) * 1000.0, most=sizes[-1], worst=worst,
                          **({"wait_ms": wait * 1000.0} if wait is not None else {}))
 
 
-def test_with_no_wait_set_a_replica_seats_as_pinned_point_by_point():
-    for key, want in PINNED.items():
+def _grid(worst: bool) -> dict:
+    """What the grid's points seat: per_replica for robots at ROUND_TRIP_MS and at 47 ms, then Seating.seat of each of
+    ROBOTS, (seats, over)."""
+    out = {}
+    for key in PINNED:
         p, t, s = key.split("/")
         hz, valid, replan = POLICIES[p]
         play, table, sizes = slack.playback(float(hz), valid, replan), _spread(TABLES[t]), SIZES[s]
         assert "wait_s" not in play
         buffer_ms, cycle_ms = play["buffer_s"] * 1000.0, (play["play_s"] - play["buffer_s"]) * 1000.0
-        got = (slack.per_replica(table, buffer_ms, sizes=sizes, cycle_ms=cycle_ms),
-               slack.per_replica(table, buffer_ms, sizes=sizes, cycle_ms=cycle_ms, outside_ms=47.0),
-               *((n, tuple(over)) for n, over in (_seating(table, play, sizes).seat(r) for r in ROBOTS.values())))
-        assert got == want, key
+        out[key] = (slack.per_replica(table, buffer_ms, sizes=sizes, cycle_ms=cycle_ms, worst=worst),
+                    slack.per_replica(table, buffer_ms, sizes=sizes, cycle_ms=cycle_ms, outside_ms=47.0, worst=worst),
+                    *((n, tuple(over)) for n, over in (_seating(table, play, sizes, worst).seat(r)
+                                                       for r in ROBOTS.values())))
+    return out
+
+
+def test_with_no_wait_set_and_asked_for_a_share_a_replica_seats_as_pinned_point_by_point():
+    got = _grid(worst=False)
+    for key, want in PINNED.items():
+        assert got[key] == want, key
+
+
+def test_in_every_start_a_replica_seats_no_more_than_asked_for_a_share_and_puts_over_whom_it_puts_over():
+    """By default no response may be late in any start: at each point of the grid that seats no more robots than a
+    share of IN_TIME_MIN does, and every robot over then is over now."""
+    worst, shared = _grid(worst=True), _grid(worst=False)
+    for key in PINNED:
+        assert worst[key][0] <= shared[key][0] and worst[key][1] <= shared[key][1], key
+        for (n, over), (m, over_shared) in zip(worst[key][2:], shared[key][2:]):
+            assert n <= m and set(over_shared) <= set(over), key
 
 
 @pytest.mark.parametrize("wait, seats", [(None, 1), (1.2, 1), (1.3, 2), (1.4, 4), (1.7, 8)])

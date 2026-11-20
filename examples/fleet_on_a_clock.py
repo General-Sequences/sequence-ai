@@ -16,12 +16,12 @@ one robot more would get.
 In one sentence: slack.starts gives the starts a number of robots is run from (spread evenly over every way their
 requests can fall in a cycle: 64 for two robots, 128 for more) → slack.on_a_clock runs each until it repeats, 48 cycles
 at most: every robot sends a request each k / hz, or as soon as a response is back that took longer, and the server
-loop of docs/slack.md batches them → the capacity is the last number of robots, counted up from one, with at least
-slack.IN_TIME_MIN of its responses in time over the starts and a load of no more than slack.LOAD_MAX in each of them.
+loop of docs/slack.md batches them → the capacity is the last number of robots, counted up from one, with no response
+late in any start and a load of no more than slack.LOAD_MAX in each of them.
 
-WHY several starts: robots send on their own clocks, and whether two of them share a batch depends on how far apart
-their requests are. Their clocks drift, so over a long run a fleet meets every way its requests can fall, and the share
-over the starts is the share of that run.
+WHY every start: robots send on their own clocks, and whether two of them share a batch depends on how far apart their
+requests are. Each episode a robot's loop starts again from the moment it is called, and robots' clocks drift, so a
+fleet can spend a whole episode in any of the ways its requests can fall.
 """
 import argparse
 
@@ -90,5 +90,5 @@ if __name__ == "__main__":
         print(f"  {count:>6}   {in_time:>16.1%}    {sum(run[0] > 0 for run in runs):>13} of {len(runs):<3}           "
               f"{load}")
     print(f"\nslack.per_replica computes a capacity of {capacity(times, **policy)} for these times "
-          f"({by_buffer} by the buffer alone): the first number of robots\nwith fewer than {slack.IN_TIME_MIN:.0%} of "
-          f"its responses in time over the starts, or a load above {slack.LOAD_MAX:g} in one of them, ends the count.")
+          f"({by_buffer} by the buffer alone): the first number of robots\nwith a late response in any start, or a "
+          f"load above {slack.LOAD_MAX:g} in one of them, ends the count.")

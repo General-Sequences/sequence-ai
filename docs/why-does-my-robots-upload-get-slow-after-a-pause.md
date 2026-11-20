@@ -10,9 +10,9 @@ A robot that executes an action chunk and then requests the next one pauses like
 The fix is to keep the window through the pause. On the robot, `connect()` does it:
 
 ```python
-from sequence_ai.network import connect
+import sequence_ai
 
-link_user = connect("http://YOUR_GPU:8000")  # BBR where the machine allows it, and a ping while the connection is idle
+policy_user = sequence_ai.connect("http://YOUR_GPU:8000")  # BBR where the machine allows it, and a ping while idle
 ```
 
 Or change one setting on the robot, as root, and keep your own client:
@@ -87,10 +87,8 @@ A ping keeps the connection from counting as idle. It does not stop Linux from s
 does not fill, which small pings between large uploads do not. BBR and the kernel setting keep that window as well.
 `connect()` requests BBR and pings, so it has both where the machine allows BBR.
 
-Where the machine has no BBR and the policy takes longer to answer than the timeout, no ping can keep the window, and
-`connect()` sends an act of one to two first flights in two halves at once, each on a connection of its own, so each
-fits a first flight of its own. At a 50 ms round trip, 13 to 26 KB acts took a p50 of 108 to 111 ms whole and 56.5 to
-57.0 ms in halves; at 20 ms, 48 to 50 against 26; at 100 ms, 211 to 212 against 107 to 109.
+Where the machine has no BBR and the policy takes longer to answer than the timeout, no ping can keep the window: load
+BBR, or set `net.ipv4.tcp_slow_start_after_idle` to 0, as the table above says.
 
 The ping interval must be shorter than the timeout. On a link of 11.7 ms, pings 190 ms apart still kept the window
 (1.18 round trips for an upload after a pause) and pings 250 ms apart did not (2.04). Anything from 25 to 190 ms

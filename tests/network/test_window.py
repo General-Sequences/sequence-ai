@@ -170,6 +170,34 @@ def test_a_ping_that_raises_stops_the_pings_and_a_real_thread_pings_until_closed
     assert not warm._thread.is_alive()
 
 
+def test_a_ping_that_raised_is_restarted_by_the_next_send_and_the_failure_is_counted():
+    """A ping that raises ends the warm thread (the connection looked dead) and is counted in pings_failed, and the
+    thread forgets itself; a later used() - a send that got through, so the connection recovered - starts a fresh
+    thread that pings again, rather than leaving the connection never pinged (the keep-warm benefit, silently lost
+    before: the thread stayed a dead object and used() never restarted it)."""
+    fail_cleared, pinged = threading.Event(), threading.Event()
+
+    def ping():
+        if not fail_cleared.is_set():
+            raise ConnectionError("the server is briefly gone")
+        pinged.set()
+        return True
+
+    warm = window.Warm(ping, every_s=0.01)
+    warm.used()                                             # first thread: its ping raises, so the thread ends
+    for _ in range(200):
+        if warm._thread is None:
+            break
+        time.sleep(0.01)
+    assert warm._thread is None                             # it forgot itself, so the next send can restart it
+    assert warm.pings_failed == 1 and warm.pings == 0       # the failure is counted; no ping was sent
+
+    fail_cleared.set()                                      # the connection recovered
+    warm.used()                                             # a send got through: a fresh thread starts and pings again
+    assert pinged.wait(2.0) and warm.pings >= 1
+    warm.close()
+
+
 def test_close_waits_for_a_ping_in_flight_and_none_follows():
     started, release = threading.Event(), threading.Event()
 

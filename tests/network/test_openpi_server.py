@@ -284,6 +284,49 @@ def test_python_dash_m_runs_the_script_as_its_own_command_with_openpis_server_pa
     assert missing.returncode != 0 and "no script at scripts/no_such.py" in missing.stderr
 
 
+STACKS = '''
+import inspect
+import json
+import sys
+import types
+
+for i in range(3000):                       # as many modules loaded as openpi's server has
+    module = types.ModuleType(f"loaded_{i}")
+    module.__file__ = f"/nowhere/loaded_{i}.py"
+    sys.modules[module.__name__] = module
+inspect.stack()                             # inspect's caches filled, as its first call fills them
+real, looked = inspect.ismodule, []
+inspect.ismodule = lambda o: looked.append(o) or real(o)
+for _ in range(5):
+    inspect.stack()
+inspect.ismodule = real
+print(json.dumps({"looked": len(looked)}))
+'''
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="runpy runs from its own file before Python 3.11")
+def test_a_script_run_by_python_dash_m_has_no_frame_inspect_looks_up_through_every_module(tmp_path):
+    """openpi's typecheck calls inspect.stack() at each Observation it makes; a frame that runs from no file - runpy's,
+    frozen since Python 3.11 - had inspect look its module up through every module loaded, each time: 23 ms an act on
+    an L4. Under `python -m sequence_ai.network.openpi`, five stacks of the script look up a few modules, not 3,000 a
+    frame."""
+    serving = tmp_path / "site" / "openpi" / "serving"
+    serving.mkdir(parents=True)
+    (serving.parent / "__init__.py").write_text("")
+    (serving / "__init__.py").write_text("")
+    (serving / "websocket_policy_server.py").write_text(SERVER)
+    scripts = tmp_path / "repo" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "serve_policy.py").write_text(STACKS)
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(TREE), str(tmp_path / "site"),
+                                                                      os.environ.get("PYTHONPATH")]))}
+    done = subprocess.run([sys.executable, "-m", "sequence_ai.network.openpi", "scripts/serve_policy.py"],
+                          capture_output=True, text=True, timeout=120, cwd=tmp_path / "repo", env=env, check=False)
+    assert done.returncode == 0, done.stderr[-2000:]
+    looked = json.loads(done.stdout.strip().splitlines()[-1])["looked"]
+    assert looked < 3000, looked
+
+
 class _Compiling(_Policy):
     """A policy whose first inference runs `first_s` on the server's event loop, as a first JAX inference compiles."""
 

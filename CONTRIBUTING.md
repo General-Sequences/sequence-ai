@@ -9,9 +9,10 @@ Two parts of the package work with any policy server, and are developed in this 
 (`sequence_ai/engine/`) and the network layer (`sequence_ai/network/`), with their tests, `examples/`, `bench/` and
 `docs/`. Pull requests to these are reviewed and merged here.
 
-The rest of the package, `seq/` and the other modules of `sequence_ai/`, is the client for GPUs and deployments hosted
-by General Sequences. It is developed in General Sequences' own repository and published here, as it ships, at each
-release, without its comments or its tests. A pull request to those files cannot be merged as it is: open an issue, and
+The rest of the package, `seq/` and the other modules of `sequence_ai/`, holds what a policy is written with, `seq init`,
+`seq serve` and `seq weights get`, `chat()`, `check` and the code under the connection. It is developed in General
+Sequences' own repository and published here, as it ships, at each release, without its comments or its tests. The
+client of General Sequences' hosted service, `sequence-cloud`, is not in this repository. A pull request to those files cannot be merged as it is: open an issue, and
 the change is made upstream and arrives with the next release.
 
 Each release publishes the whole tree again in one commit, tagged with its version, the merged changes in it.

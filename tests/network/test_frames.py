@@ -6,6 +6,9 @@ returns already-encoded input without re-encoding it; `resize_image` resizes one
 mode and filter passed explicitly; "pad" matches openpi's resize_with_pad byte for byte; `image_size` reads a frame's
 size from its header; `decode` turns a JPEG or PNG back into the array on the server, and opens nothing else.
 
+Adapted from Physical-Intelligence/openpi packages/openpi-client/src/openpi_client/image_tools.py (Apache-2.0): the
+reference the test holds "pad" to is openpi's resize_with_pad (THIRD_PARTY_NOTICES.md).
+
     python -m pytest -q tests/network/test_frames.py
 """
 
@@ -182,18 +185,3 @@ def test_decode_opens_no_format_but_jpeg_and_png():
     for bad in ("aGVsbG8gd29ybGQ=", "", b"", jpeg[: len(jpeg) // 2], "%%% not base64 %%%", "data:image/jpeg;base64"):
         with pytest.raises(ValueError):
             decode(bad)
-
-
-def test_an_rgb_pil_image_is_a_picture_as_its_array_is_and_is_packed_as_jpeg():
-    """resize_image's output, an RGB PIL image, is a picture as an HxWx3 uint8 array of its size is; a PIL image of
-    another mode, or smaller than PICTURE_MIN_SIDE, is not."""
-    from sequence_ai.network.frames import PICTURE_MIN_SIDE, is_pil_image, is_picture, pack_pictures, unpack_pictures
-
-    frame = resize_image(_smooth(48, 64), 224, 224, mode="pad", filter="bilinear")
-    assert is_pil_image(frame) and frame.mode == "RGB" and is_picture(frame)
-    assert not is_picture(frame.convert("L")) and not is_picture(frame.resize((PICTURE_MIN_SIDE - 1, 64)))
-    assert not is_pil_image(np.asarray(frame)) and is_picture(np.asarray(frame))
-    packed, n = pack_pictures({"image": frame, "state": [0.0, 1.0]})
-    assert n == 1 and packed["state"] == [0.0, 1.0]
-    restored = unpack_pictures(packed)["image"]
-    assert restored.shape == (224, 224, 3) and np.abs(restored.astype(int) - np.asarray(frame)).mean() < 4

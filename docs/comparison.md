@@ -6,7 +6,7 @@ of components for the connection underneath, and you use it in one of three ways
 
 | You run | You keep | You add from `sequence_ai.network` |
 |---|---|---|
-| openpi | openpi's server and client, unchanged | on the robot, `openpi.keep(policy)`, and `image_tools` from `sequence_ai.network.openpi` for pictures as JPEG; on the GPU, its server started through `python -m sequence_ai.network.openpi` |
+| openpi | openpi's server and client, unchanged | on the robot, `openpi.keep(policy)`, and `image_tools` from `sequence_ai.network.openpi` for pictures as JPEG; on the GPU, `openpi.patch()` in its server script |
 | LeRobot's remote inference | LeRobot's server and client, unchanged | one Zenoh setting, in a file: `lerobot.keep_alive_file(path)` |
 | your own server | your model and your handler | `connect()` on the robot; `one_write`, `ping`, `compressed`, `tcp_link` on the server |
 
@@ -19,13 +19,13 @@ against openpi or LeRobot has been made.
 | | openpi | LeRobot 0.7.0 | These components |
 |---|---|---|---|
 | What it is | A policy server and a client for openpi's models | A policy server and a remote executor for LeRobot's policies | Components for the connection; no model loading |
-| Starts with | `uv run scripts/serve_policy.py --env=...` and `WebsocketClientPolicy(host, port)` | `lerobot-policy-server` and `lerobot-rollout --inference.type=remote` | `connect(url)` against your own server |
-| Transport | WebSocket; the client opens one connection and reuses it | Zenoh, over TCP by default (`tcp/127.0.0.1:7447`) | HTTP on one persistent connection; options for WebSocket servers |
+| Starts with | `uv run scripts/serve_policy.py --env=...` and `WebsocketClientPolicy(host, port)` | `lerobot-policy-server` and `lerobot-rollout --inference.type=remote` | `serve(policy)` on the GPU, `sequence_ai.connect(url)` on the robot |
+| Transport | WebSocket; the client opens one connection and reuses it | Zenoh, over TCP by default (`tcp/127.0.0.1:7447`) | The robot's stream: one WebSocket, kept open; options for WebSocket servers of your own |
 | Message format | msgpack, numpy arrays as raw bytes | msgpack, arrays as raw bytes | msgpack, numpy arrays as raw bytes; reads openpi's array layout and msgpack-numpy's |
-| Camera frames | Resized on the robot with `image_tools.resize_with_pad` | Sent raw, or as JPEG (`encoding`, `jpeg_quality`) | `frames.resize_image` (its `"pad"` is openpi's `resize_with_pad`), `frames.encode` for JPEG and `frames.decode` on the server, `openpi.image_tools` and `openpi.patch()` for openpi's own client and server, lossless `compress` |
-| Action chunks | `ActionChunkBroker` executes a chunk open-loop and requests the next when it is exhausted | Requests ahead of time, based on the turnaround it measured; aligns the new chunk with the one being executed; real-time chunking modes | None: `link.act()` returns your server's response |
+| Camera frames | Resized on the robot with `image_tools.resize_with_pad` | Sent raw, or as JPEG (`encoding`, `jpeg_quality`) | `frames.resize_image` (its `"pad"` is openpi's `resize_with_pad`), `frames.encode` for JPEG and `frames.decode` on the server, `openpi.image_tools` and `openpi.patch()` for openpi's own client and server; `sequence_ai.Video` as low-latency video, a picture not marked as a keyframe of its own (`pictures="exact"`: as it is) |
+| Action chunks | `ActionChunkBroker` executes a chunk open-loop and requests the next when it is exhausted | Requests ahead of time, based on the turnaround it measured; aligns the new chunk with the one being executed; real-time chunking modes | None: `act()` returns what the policy returned |
 | Robots on one server | Each connection's handler calls `policy.infer` itself; no batching across connections | One robot session; a second receives `busy` | Whatever your server does; `sequence_ai.engine` has `batcher`, `slack` and `replicas` |
-| Timing it reports | `server_timing` in each response: the model's time in milliseconds | The turnaround of recent requests, kept by the client | p50, p95 and p99 of each request (`link.stats()`); each client's RTT and retransmissions, from the server's kernel (`tcp_link`) |
+| Timing it reports | `server_timing` in each response: the model's time in milliseconds | The turnaround of recent requests, kept by the client | p50, p95 and p99 of each act (`policy.stats()`); each client's RTT and retransmissions, from the server's kernel (`tcp_link`) |
 
 ## The connection between requests
 
@@ -53,8 +53,8 @@ statement about the mechanism. Measure your own link with [`bench/`](../bench/).
 
 ## Which should I use?
 
-- **You serve an openpi model (π0, π0-FAST, π0.5).** Use openpi's server and client. Start the server through
-  `python -m sequence_ai.network.openpi` and import `image_tools` from it on the robot to send the pictures as JPEG, and
+- **You serve an openpi model (π0, π0-FAST, π0.5).** Use openpi's server and client. Patch the server with
+  `openpi.patch()` in its script and import `image_tools` from `sequence_ai.network.openpi` on the robot to send the pictures as JPEG, and
   add `openpi.keep(policy)` if the robot is on Linux and pauses between chunks:
   [How do I run π0 (openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md)
 - **You serve a LeRobot policy.** Use LeRobot's remote inference. Add the Zenoh file on both sides:

@@ -242,9 +242,8 @@ def test_a_pil_image_is_sent_as_its_array():
 
 
 def test_a_pil_module_still_being_imported_leaves_arrays_packed_as_arrays(monkeypatch):
-    """frames.warm() imports Pillow on a thread of its own as the server first says it reads JPEG, and the robot's
-    first act packs meanwhile: PIL.Image is in sys.modules with no Image class yet, and every array is packed as it
-    is, where reading that class raised AttributeError."""
+    """Another thread imports Pillow while an observation packs: PIL.Image is in sys.modules with no Image class yet,
+    and every array is packed as it is, where reading that class raised AttributeError."""
     np = pytest.importorskip("numpy")
     import types
 

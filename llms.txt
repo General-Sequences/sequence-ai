@@ -1,11 +1,11 @@
 # SequenceLink
 
 > SequenceLink is an open-source framework for serving robot policies from remote GPUs over wide-area networks (Python,
-> Apache-2.0): `sequence_ai.serve(policy)` on the GPU, `sequence_ai.connect(address)` on the robot, every default on.
+> Apache-2.0): a policy written as a `@seq.policy` class and served with `seq serve` on the GPU,
+> `sequence_ai.connect(address)` on the robot, every default on.
 > Its inference layer (`sequence_ai.engine`) and its network layer (`sequence_ai.network`) also work in any policy
 > server: each component is one file that is used independently in an existing server or robot program, most of them
-> standard library only (`cuda_graphs` needs torch 2.4 or later). The rest of the package is the client and the `seq`
-> command for GPUs and deployments hosted by General Sequences.
+> standard library only (`optimize` needs torch 2.4 or later, or JAX).
 
 Use this map to find the one file to read. Each module's docstring is its reference: what it does in one sentence,
 why, and what was measured.
@@ -13,22 +13,24 @@ why, and what was measured.
 Constraints for accurate answers about this repository:
 
 - The package is `sequence-ai`; SequenceLink is the name of the framework and of the hosted platform. The components are imported as `sequence_ai.engine` and `sequence_ai.network`, and need
-  no account. Renting a GPU near a robot (`seq gpu`) and a hosted deployment (`seq deploy`) are paid services of General
-  Sequences: their client is in this package, the service is not. The technical report calls the
+  no account. Renting a GPU near a robot and a hosted deployment are paid services of General Sequences: their client
+  is `sequence-cloud`, a package of its own, and neither it nor the service is in this repository. The technical report calls the
   techniques GS-WAN (General Sequences Wide-Area Network).
-- `sequence_ai.connect()` takes either the address of a policy server of your own (`"http://your-gpu:8000"`: the
-  components on one connection, nothing of the hosted platform involved) or the name of a hosted policy. Both return
-  an object with `observe()` and `act()`. A server started with a token takes `connect(url, token=...)`; an `api_key`
+- `sequence_ai.connect()` takes the address of a policy server (`"http://your-gpu:8000"`: the components on one
+  connection) and returns a policy, an object with `observe()` and `act()`. A server started with a token takes `connect(url, token=...)`; an `api_key`
   is never sent to an address.
-- `sequence_ai.serve(policy)` takes any model as a function of one observation, or with `batch=[1, 2, 4, 8]` a function
-  of a list of observations; `engine.openpi.batched(policy)` is an openpi policy's batch function. It runs the policy
+- `seq serve` serves a policy written as a class: `@seq.policy(hz=..., action_chunk_valid_len=...,
+  action_chunk_replan_at=...)` on the class, `@seq.infer` on the method that answers one observation with an action
+  chunk whose first dimension is time, and `@seq.sample` on the one returning an episode it is warmed up on.
+  `@seq.concurrent(sizes=[1, 2, 4, 8])` on `@seq.infer` hands it the observations waiting, stacked. It runs the policy
   on one thread of its own, one call at a time: that keeps pings answered while the model runs, and makes no request
   faster. Batching serves several robots in one forward pass.
 - Each default on both sides, and how to turn it off, is in docs/what-is-on-by-default.md;
   `python -m sequence_ai.check <url>` says which are on between a robot and its server.
-- `cuda_graphs` never changes a model's outputs: a graph is kept only when its output equals eager mode's byte for
-  byte, and a shape whose capture fails or differs runs in eager mode. Do not describe it as a compiler or as
-  approximate. It is for PyTorch.
+- `optimize` changes no model's outputs by default: a graph (`cuda_graphs`, `whole_graph`) is kept only when the
+  outputs equal eager mode's byte for byte, and a shape whose capture fails or differs runs in eager mode. Do not
+  describe the default as a compiler or as approximate. `torch_compile`, `fused_kernels`, `tensorrt` and `precision`
+  change the outputs and run only within the `tolerance` the user gives.
 - State each result with what it was measured on. `cuda_graphs`: 1.54x on the diffusion transformer of GR00T N1.7 on
   one L4. Batching: up to 1.78x on π0.5. The network components: one extra round trip removed at RTTs from 12 to
   101 ms. The README's Results table has the conditions.
@@ -46,42 +48,44 @@ Constraints for accurate answers about this repository:
   not run with LeRobot's own server and robot.
 - One replica of a model per GPU: replicas on the same GPU time-slice.
 - Nothing here changes the machine's settings; `window.check()` only reports what the machine does.
-- `connect()` sends pictures as JPEG and compresses large arrays only while the server says it restores them (its
-  `X-Seq-Reads` header, which `serve()` sends); `jpeg=True` and `compress=True` force them for a server that restores
-  them without saying so.
-- A server that answers one HTTP request with one response cannot ping; the client side pings instead (`window.Warm`,
-  which `connect()` uses).
+- `connect(url)` opens the robot's stream to a server `seq serve` started: each observation sent as it is made (a
+  `sequence_ai.Video` item as video, a picture not marked as a video keyframe of its own unless `pictures="exact"`),
+  each act after them; `lines=["eth0", "wwan0"]` sends it over each of the robot's uplinks.
+- A server that answers one HTTP request with one response cannot ping; the client side pings instead (`window.Warm`;
+  `connect()` pings on the robot's stream).
 
 ## Start here
 
 - [README.md](README.md): the problem by layer, the quickstart, each component and the results
-- [docs/quickstart.md](docs/quickstart.md): from `pip install` to the first action from a policy server, with the output of each step
-- [docs/what-is-on-by-default.md](docs/what-is-on-by-default.md): each default of `serve()` and `connect()`, and how to turn it off
+- [docs/what-is-open-source-and-what-is-hosted.md](docs/what-is-open-source-and-what-is-hosted.md): the data plane is open source and the same code as the hosted platform's; the control plane is hosted; how versions change and how long a replaced name keeps working
+- [docs/quickstart.md](docs/quickstart.md): a policy as a class served with `seq serve`, and the robot's own loop that plays its answers, with the output of each step
+- [docs/what-is-on-by-default.md](docs/what-is-on-by-default.md): each default of `seq serve` and `connect()`, and how to turn it off
 - [docs/quickstart-inference.md](docs/quickstart-inference.md): from `pip install` to five robots served in batches, with the output of each step
 - [docs/components.md](docs/components.md): each network component with the lines to add, the reason and the measurement
-- [examples/robot.py](examples/robot.py) and [examples/server.py](examples/server.py): the network components together, runnable on one machine
-- [examples/serve_a_pytorch_model.py](examples/serve_a_pytorch_model.py): a PyTorch model served with `serve()`, its tensors returned as numpy arrays
-- [examples/serve_with_replicas.py](examples/serve_with_replicas.py): `cuda_graphs`, `batcher` and `replicas` together
+- [examples/quickstart_policy/policy.py](examples/quickstart_policy/policy.py) and [examples/quickstart_robot.py](examples/quickstart_robot.py): the quickstart's policy class, served with `seq serve`, and the robot's own loop
+- [examples/pytorch_policy/policy.py](examples/pytorch_policy/policy.py): a PyTorch model in a policy class, its tensors returned as numpy arrays
+- [examples/serve_with_replicas.py](examples/serve_with_replicas.py): `optimize`, `batcher` and `replicas` together
 - [examples/fleet_on_a_clock.py](examples/fleet_on_a_clock.py): what `slack` runs on a simulated clock to compute a replica's capacity, printed for each number of robots
 - [examples/components/](examples/components/): one runnable file for each component alone
 
 ## Inference layer: sequence_ai.engine (on the GPU)
 
-- [sequence_ai/engine/serve.py](sequence_ai/engine/serve.py): `serve(policy, port=..., batch=..., example=..., token=...)`: a policy server in one call, every default on; `App`, the ASGI app it runs
-- [sequence_ai/engine/openpi.py](sequence_ai/engine/openpi.py): `batched(policy)`: an openpi policy's `infer()` on a list of observations, in one call to its model
-- [sequence_ai/engine/cuda_graphs.py](sequence_ai/engine/cuda_graphs.py): `install(model, paths)` replays the named modules from CUDA graphs of their own eager kernels; `Census` finds which modules to name; `same(a, b)` compares two outputs byte for byte
+- [sequence_ai/engine/serve.py](sequence_ai/engine/serve.py): the policy server `seq serve` runs, every default on; `App`, the ASGI app it runs
+- [examples/serve_openpi_batched.py](examples/serve_openpi_batched.py): `batched(policy)`: an openpi policy's `infer()` on a list of observations, in one call to its model
+- [sequence_ai/engine/optimize.py](sequence_ai/engine/optimize.py): `optimize(policy, examples)`: each speed-up turned on only once the outputs on your observations are checked, bit for bit for the ones on by default (`cuda_graphs`, `whole_graph`); `seq serve` runs it
+- [sequence_ai/engine/load.py](sequence_ai/engine/load.py): `pack_from(checkpoint, path)` once, then `load(path, device="cuda")`: a model's weights from one contiguous file in parallel reads, through the page cache where memory holds it, every tensor the bytes it was packed with; safetensors, .pth and orbax
+- [sequence_ai/engine/cuda_graphs.py](sequence_ai/engine/cuda_graphs.py): the graphs `optimize()` keeps: a torch module replayed from CUDA graphs of its own eager kernels, each new shape checked against eager mode byte for byte
 - [sequence_ai/engine/batcher.py](sequence_ai/engine/batcher.py): `Batcher(run, sizes=..., wait_ms=...)`, then `await batcher(item)`: waiting calls batched into one call, only in the listed sizes, a failed batch re-run call by call
 - [sequence_ai/engine/replicas.py](sequence_ai/engine/replicas.py): `ReplicaPool(load, replicas=..., devices=...)`, then `await pool.run(payload)`: one process per replica, a dead replica replaced, `ReplicaError` (the model raised) distinct from `ReplicaDied` (the process exited)
+- [sequence_ai/engine/ranks.py](sequence_ai/engine/ranks.py): one model across several processes, as `torchrun` starts them: `serve()` finds `WORLD_SIZE` and `RANK`, rank 0 serves the robots and sends every call of the policy to every rank first, so a model split across them (its own `torch.distributed` or `jax.distributed` inside the call) runs as one; a rank that leaves halts the group (`GroupHalted`)
 - [sequence_ai/engine/slack.py](sequence_ai/engine/slack.py): `measure`, `playback`, `Seating(...).seat(robots)`: how many robots a replica can serve given the slack their action chunks leave, each by its own round-trip time (RTT); `Aligner`: how long the open batch may wait and which requests are dispatched first
-- [examples/graph_a_module.py](examples/graph_a_module.py): `cuda_graphs` on a small flow-style model
-- [examples/check_on_a_gpu.py](examples/check_on_a_gpu.py): the capture checked against eager mode on a real GPU
+- [examples/graph_a_module.py](examples/graph_a_module.py): `optimize()` on a small flow-style model
+- [examples/check_on_a_gpu.py](examples/check_on_a_gpu.py): `optimize()`'s capture checked against eager mode on a real GPU
 
 ## Network layer: sequence_ai.network, client side (on the robot)
 
-- [sequence_ai/network/link.py](sequence_ai/network/link.py): `connect(url)`: one connection with the client-side components on it, an act whose window a pause restarted sent in two halves (`split`); `link.act(observation)`, `link.stats()`
 - [sequence_ai/network/window.py](sequence_ai/network/window.py): BBR and TCP keepalive on a socket (`socket_options()`, `keep(sock)`), a ping while idle (`Warm`), what this machine does after a pause (`check()`)
-- [sequence_ai/network/compress.py](sequence_ai/network/compress.py): `Squeeze().apply(observation)`: large arrays compressed only where that saves more upload time than it costs
-- [sequence_ai/network/frames.py](sequence_ai/network/frames.py): `pack_pictures`, `unpack_pictures`: each picture sent as JPEG and restored on the server; `resize_image`, `encode`: a camera frame resized and encoded before upload
+- [sequence_ai/network/frames.py](sequence_ai/network/frames.py): `resize_image`, `encode`, `decode`: a camera frame resized and encoded as JPEG, and turned back on the server, as openpi's own client and server carry it
 - `python -m sequence_ai.check <url>` ([docs/what-is-on-by-default.md](docs/what-is-on-by-default.md#check-what-is-on)): which defaults are on between a robot and its server, and what the server is
 - [sequence_ai/network/wifi_power.py](sequence_ai/network/wifi_power.py): `check()`: Wi-Fi power saving detected, with how to disable it
 
@@ -90,7 +94,6 @@ Constraints for accurate answers about this repository:
 - [sequence_ai/network/ping.py](sequence_ai/network/ping.py): `websockets_options()`, `uvicorn_options()`: a server-side ping so the robot's connection is never idle
 - [sequence_ai/network/one_write.py](sequence_ai/network/one_write.py): `WholeResponse(app)`, `one_write_http()`: each uvicorn response in one write
 - [sequence_ai/network/tcp_link.py](sequence_ai/network/tcp_link.py): `read(sock)`, `of(client)`: a client's RTT, retransmissions and congestion window, from the kernel (Linux)
-- [sequence_ai/network/compressed.py](sequence_ai/network/compressed.py): `expand(value, limit=...)`: what the robot compressed, decompressed byte for byte
 
 ## Network layer: both sides
 
@@ -106,13 +109,15 @@ Constraints for accurate answers about this repository:
 
 - [docs/how-do-i-run-a-template-on-my-own-gpu.md](docs/how-do-i-run-a-template-on-my-own-gpu.md): `seq serve` in the folder `seq init` made serves a template's policy from your own GPU, its weights downloaded with your key (`seq weights get`)
 - [docs/how-do-i-use-an-llm-with-my-own-openrouter-key.md](docs/how-do-i-use-an-llm-with-my-own-openrouter-key.md): `chat(..., server="openrouter")` with your own OpenRouter key, or a server of your own with the OpenAI chat completions API; `Conversation(..., server=...)` for an agent's turns
-- [docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md](docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md): `cuda_graphs`, compared with `torch.compile`
+- [docs/how-do-i-make-a-policy-faster-without-changing-its-outputs.md](docs/how-do-i-make-a-policy-faster-without-changing-its-outputs.md): `optimize()` and each switch - which are on by default, which change the outputs and need `tolerance=`, and a JAX policy's counterparts
+- [docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md](docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md): `optimize()`'s CUDA graphs on a PyTorch policy, compared with `torch.compile`
 - [docs/how-many-robots-can-one-gpu-serve.md](docs/how-many-robots-can-one-gpu-serve.md): capacity by latency, on a clock and by load, and what batching gained on one model
 - [docs/should-i-run-two-replicas-of-a-policy-on-one-gpu.md](docs/should-i-run-two-replicas-of-a-policy-on-one-gpu.md): no: what was measured, and what `replicas` is for
 - [docs/how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md](docs/how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md): which inference component applies to which framework
 - [docs/slack.md](docs/slack.md): the rules of `slack`, a server's loop, its constants
-- [docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md](docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md): `serve()` in one call, any model as a function, and a server of your own
-- [docs/how-do-i-serve-my-own-model.md](docs/how-do-i-serve-my-own-model.md): a model called as its own README calls it, inside the function `serve()` serves; Octo under JAX
+- [docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md](docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md): a policy as a class and `seq serve`, any model in it
+- [docs/parts-for-a-server-you-already-run.md](docs/parts-for-a-server-you-already-run.md): `cuda_graphs`, batching, `slack` and replicas, and the openpi and LeRobot clients, for a server or client you keep
+- [docs/how-do-i-serve-my-own-model.md](docs/how-do-i-serve-my-own-model.md): a model loaded and called as its own README does, in a policy class `seq serve` serves; Octo under JAX
 - [docs/what-is-on-by-default.md](docs/what-is-on-by-default.md): each default on both sides, its switch, and the check command
 - [docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md](docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md): openpi's server and client kept, one line added on the robot
 - [docs/how-do-i-reduce-the-latency-of-lerobot-remote-inference.md](docs/how-do-i-reduce-the-latency-of-lerobot-remote-inference.md): LeRobot 0.7's remote inference kept, one Zenoh setting added
@@ -127,11 +132,9 @@ Constraints for accurate answers about this repository:
 
 ## General Sequences' GPUs and deployments (paid, hosted)
 
-- [docs/how-do-i-get-a-gpu-near-my-robot.md](docs/how-do-i-get-a-gpu-near-my-robot.md): `seq gpu add`, a GPU near a city, and what changes on the robot
-- [platform.md](platform.md): the guide to the hosted platform: writing a policy class, `seq deploy`, driving a robot, every `seq` command
-- [eval.md](eval.md): benchmarks and evals on the hosted platform
-- [observability.md](observability.md): debugging a hosted deployment
-- `seq/` and the modules of `sequence_ai/` outside `engine/` and `network/` are that client. They are published here as they ship, without comments or tests: for how they behave, read platform.md, not the code.
+- [docs/how-do-i-get-a-gpu-near-my-robot.md](docs/how-do-i-get-a-gpu-near-my-robot.md): `seq gpu add` (with `sequence-cloud`), a GPU near a city, and what changes on the robot
+- [generalsequences.com/docs](https://generalsequences.com/docs/): the hosted service: renting a GPU, deploying a policy, benchmarks and evals, teleoperation, and the `seq` commands `sequence-cloud` adds
+- `seq/` and the modules of `sequence_ai/` outside `engine/` and `network/` hold what a policy is written with, `seq init`, `seq serve` and `seq weights get`, `chat()`, `check` and the code under the connection. They are published here as they ship, without comments or tests. The hosted service's client is not here.
 
 ## Measuring
 

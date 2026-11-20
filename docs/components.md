@@ -6,10 +6,10 @@ Python 3.12, so the components that read the Linux kernel return `None` or `Fals
 
 | Client side | Server side | Both sides | Combined |
 |---|---|---|---|
-| [`window`](#window-the-congestion-window-kept-through-the-pauses) | [`ping`](#ping-a-server-side-ping) | [`msgpack_io`](#msgpack_io) | [`connect`](#connect-the-client-side-components-combined) |
-| [`compress`](#compress-only-where-it-saves-time) | [`one_write`](#one_write-a-response-in-one-write) | [`latency_stats`](#latency_stats) | [`openpi`](#openpi-and-lerobot) |
-| [`frames`](#frames-a-frame-resized-before-upload-and-decoded-on-the-server) | [`tcp_link`](#tcp_link-each-clients-link-read-from-the-kernel) | | [`lerobot`](#openpi-and-lerobot) |
-| [`wifi_power`](#wifi_power-wi-fi-power-saving-detected) | [`compressed`](#compressed-decompress-what-the-client-compressed) | | [`bench/`](how-do-i-measure-the-link-between-my-robot-and-my-gpu.md) |
+| [`window`](#window-the-congestion-window-kept-through-the-pauses) | [`ping`](#ping-a-server-side-ping) | [`msgpack_io`](#msgpack_io) | [`connect`](#connect-the-robots-own-connection) |
+| [`frames`](#frames-a-frame-resized-before-upload-and-decoded-on-the-server) | [`one_write`](#one_write-a-response-in-one-write) | [`latency_stats`](#latency_stats) | [`openpi`](#openpi-and-lerobot) |
+| [`wifi_power`](#wifi_power-wi-fi-power-saving-detected) | [`tcp_link`](#tcp_link-each-clients-link-read-from-the-kernel) | | [`lerobot`](#openpi-and-lerobot) |
+| | | | [`bench/`](how-do-i-measure-the-link-between-my-robot-and-my-gpu.md) |
 
 What a component saves depends on your link, and every number below is given with the link it was measured on. The
 inference components (`sequence_ai.engine`) are described in the [README](../README.md#inference-layer).
@@ -46,12 +46,6 @@ every request.
 
 A ping cannot keep a window that the pings do not fill; BBR, or `tcp_slow_start_after_idle=0`, keeps that one.
 
-**An act in halves.** Where the window restarts anyway - on Linux without BBR, after a policy whose answer takes longer
-than the retransmission timeout - `connect()` sends an act whose body is more than the restarted window's first flight
-and no more than two (13,032 to 26,064 bytes on Ethernet) in two halves at once, each on a connection of its own, so
-each fits a first flight of its own. `serve()` joins them and runs the act once. Measured at a 50 ms round trip with a
-200 ms policy, 13 to 26 KB acts took a p50 of 108 to 111 ms whole and 56.5 to 57.0 ms in halves; `split=False` sends
-them whole.
 `window.check()` issues a warning once per process, with both ways to keep the window, and changes nothing on the
 machine.
 [Why does my robot's upload get slow after a pause?](why-does-my-robots-upload-get-slow-after-a-pause.md) has the
@@ -65,38 +59,6 @@ restarts a window after a pause: False
 BBR on your own socket: False; its congestion control: None
 pings in 0.3 s of idle time: 5
 ```
-
-### `compress`: only where it saves time
-
-```python
-from sequence_ai.network import compress, msgpack_io
-
-squeeze_user = compress.Squeeze()                                       # one per connection
-# large arrays compressed in place, if that saves time
-body_user = msgpack_io.pack(squeeze_user.apply(observation_user))
-squeeze_user.uplink.note(len(body_user), seconds_the_upload_took_user)  # so it learns this link's upload rate
-```
-
-An array is compressed with zstd level 1 only while the upload time that saves, at the uplink rate measured on this
-connection, exceeds the time to compress and decompress it. Data that does not compress, such as a JPEG's bytes, is sent
-uncompressed and tried again later. Without the `zstandard` package (and before Python 3.14, which has zstd built in) it
-uses zlib level 1.
-
-**Measured.** Camera frames of 172,800 bytes (320 by 180, from a public robot dataset): 0.37 ms to compress, 0.21 ms
-to decompress, about 1.9 times smaller, on a laptop. Those frames were decoded from video, which compresses better
-than a camera's raw frames.
-
-`python examples/components/compress.py` printed:
-
-```text
-a frame of 921,600 bytes was uploaded as 37,617
-decompressed byte for byte: 884,137 bytes larger than what arrived
-on that link the next frame is sent uncompressed: True
-```
-
-The example's frame is synthetic, flat regions and edges, so it compresses far more than a camera's does. The last
-line shows the rule: once the link is fast enough that compressing costs more than it saves, the frame is sent
-uncompressed.
 
 ### `frames`: a frame resized before upload, and decoded on the server
 
@@ -140,35 +102,35 @@ delayed until the adapter wakes. `check()` reads the machine's settings and chan
 Wi-Fi power saving is on: no (or this is not Linux, or not Wi-Fi)
 ```
 
-### `connect`: the client-side components combined
+### `connect`: the robot's own connection
 
 ```python
-from sequence_ai.network import connect
+import sequence_ai
 
-with connect("http://your-gpu:8000", compress=True) as link_user:     # compress: only if your server decompresses
-    response_user = link_user.act({"image": frame_user, "state": state_user})
-    print(link_user.stats()["latency_us"]["act_us"])                   # the requests' p50, p95 and p99
+with sequence_ai.connect("http://your-gpu:8000") as policy_user:       # seq serve at that address
+    policy_user.wait_until_ready()
+    policy_user.observe({"image": sequence_ai.Video(frame_user), "state": state_user})
+    actions_user = policy_user.act()["actions"]
+    print(policy_user.stats()["latency_us"]["act_us"])                 # the acts' p50, p95 and p99
 ```
 
-One httpx connection with `window`'s socket options on it, a small GET while it is idle, msgpack both ways, and each
-request timed. A ping and a request never run at once and never take a second connection: a client that starts a request
-while a ping is in flight would open a new connection for it, with a new handshake and a cold window.
+The same policy a deployed one's name gives, on the robot's stream: one WebSocket to the server, each observation sent
+as it is made, and each act after them naming how many observations came before it. The server answers once those are
+in, from the newest. What it does by default:
 
-Your server needs a POST that takes a msgpack body and responds with msgpack or JSON, and any cheap GET for the
-ping (`ping_path=None` disables the pings). [`examples/server.py`](../examples/server.py) is one, and so is the
-[Quickstart](quickstart.md)'s.
-
-| Option | Default | What it is |
+| | What it does | To change it |
 |---|---|---|
-| `act_path` | `"/act"` | the POST path the observation is sent to |
-| `ping_path` | `"/ping"` | the GET sent while idle; `None` for no pings |
-| `ping_every_s` | `0.1` | the idle time after which a ping is sent |
-| `ping_for_s` | `60.0` | how long pings continue after the last request |
-| `compress` | `False` | compress large arrays where that saves time; the server must call `compressed.expand` |
-| `timeout` | `10.0` | seconds to wait for a response |
-| `headers` | `None` | headers sent with every request |
-| `check` | `True` | warn once if this machine restarts its window after a pause, and if Wi-Fi power saving is on |
-| `split` | `True` | an act whose window a pause restarted, one to two first flights long, sent in two halves on two connections while the server joins them |
+| the stream | one WebSocket, kept open, with `window`'s socket options; a ping after each 100 ms of idle time, for 60 s after the last request | - |
+| video | a `sequence_ai.Video` item goes as low-latency video (H.264), a keyframe every second and after anything lost | - |
+| pictures | a picture you did not mark (H×W×3 uint8, each side 32 pixels or more) goes as a video keyframe of its own | `pictures="exact"` |
+| large arrays | compressed where that saves upload time | - |
+| lost and refused | an observation the server lost is sent again; one it refused is left out, and the video's next frame is a keyframe | - |
+| lines | one line, by the default route | `lines=["eth0", "wwan0"]` |
+| token | none | `token="..."` |
+
+Your server is `seq serve`: it takes the robot's stream, and says so on every answer
+(`X-Seq-Act-Formats`). `python -m sequence_ai.check http://your-gpu:8000` reaches it as the robot does and says what is
+on.
 
 **One connection, kept open.** This is one line in any client: create one `httpx.Client` and reuse it. Measured: a
 new connection for each call took a median 305.9 ms; one reused connection, 121.0 ms. The handshake was 184.9 ms per
@@ -248,16 +210,6 @@ the program that runs on it, and the server reads every robot the same way.
 this connection, as the server's kernel reports it: None
 ```
 
-### `compressed`: decompress what the client compressed
-
-```python
-from sequence_ai.network import compressed, msgpack_io
-
-observation_user, grew_user = compressed.expand(msgpack_io.unpack(body_user), limit=64 << 20)
-```
-
-An item whose declared size is smaller than its decompressed size is rejected rather than decompressed past `limit`.
-
 ## Both sides
 
 ### `msgpack_io`
@@ -301,13 +253,16 @@ A percentile is `None` until its window contains enough samples for it: the p99 
 
 ## openpi and LeRobot
 
-**openpi.** Keep openpi's client and server. On the GPU, start openpi's own server through this package: it then pings
-each robot every 100 ms and hands its policy each picture sent as JPEG as the array it reads. On the robot, import
-`image_tools` from here, so its pictures go as JPEG, and add the client-side components to the connection the client
-holds.
+**openpi.** Keep openpi's client and server. On the GPU, `openpi.patch()` in openpi's server script, before it makes
+the server: it then pings each robot every 100 ms while no inference runs, and hands its policy each picture sent as
+JPEG as the array it reads. openpi's server runs its policy on its event loop, which sends and answers no ping while an
+inference runs, so it waits for each pong as long as that takes. On the robot, import `image_tools` from here, so its
+pictures go as JPEG, and add the client-side components to the connection the client holds.
 
-```bash
-uv run --with sequence-ai python -m sequence_ai.network.openpi scripts/serve_policy.py --env=DROID   # the GPU
+```python
+from sequence_ai.network import openpi
+
+openpi.patch()                                        # the GPU: in openpi's scripts/serve_policy.py, before the server
 ```
 
 ```python
@@ -319,8 +274,6 @@ kept_user = openpi.keep(policy_user)  # BBR and TCP keepalive on its socket; a W
 observation_user["observation/image"] = image_tools.resize_with_pad(frame_user, 224, 224)
 action_user = policy_user.infer(observation_user)     # as before
 ```
-
-In a server script of your own, `openpi.patch()` before it makes openpi's server does what the command does.
 
 `keep()` is verified against openpi-client 0.1.2 on a local connection, and the server side and `image_tools` against
 a server module built as openpi's `websocket_policy_server.py` is. Measured on a WebSocket connection of the kind

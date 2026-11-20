@@ -1,21 +1,21 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 General Sequences Company
 # SPDX-License-Identifier: Apache-2.0
 """
-Graph the module a model calls many times per run, in three steps: find it, graph it, check that the outputs are the
-same.
+A model made faster without changing its outputs, in one call: optimize() finds the module the model calls many times
+per run, replays it from CUDA graphs of its own kernels, and keeps each graph only where the outputs stay the same,
+byte for byte, and acts are faster.
 
+    pip install sequence-ai torch
     python examples/graph_a_module.py
 
 The model here stands for a flow or diffusion action head: ten denoising steps over the same shapes. On a machine with
-no CUDA GPU the same steps run in eager mode, so this shows the flow there and saves no time.
+no CUDA GPU nothing is captured, the report says why, and the model runs as it did.
 """
 from __future__ import annotations
 
-import time
-
 import torch
 
-from sequence_ai.engine import cuda_graphs
+from sequence_ai.engine import optimize
 
 
 class Denoiser(torch.nn.Module):
@@ -40,44 +40,24 @@ class ActionHead(torch.nn.Module):
         return x
 
 
-def ms_per_run(model, noise, runs: int = 20) -> float:
-    if noise.is_cuda:
-        torch.cuda.synchronize()
-    start = time.perf_counter()
-    for _ in range(runs):
-        model(noise)
-    if noise.is_cuda:
-        torch.cuda.synchronize()
-    return (time.perf_counter() - start) * 1e3 / runs
-
-
 def main() -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = ActionHead().to(device).eval()
-    noise = torch.randn(32, 512, device=device)
+    examples = [torch.randn(32, 512, device=device) for _ in range(8)]    # what the model is called with
+    before = model(examples[0])
 
-    # 1. Find the modules worth graphing: called more than once per run, with one shape, the outermost first.
-    census = cuda_graphs.Census(cuda_graphs.modules_of(model))
-    for _ in range(3):
-        model(noise)
-        census.end_act()
-    census.close()
-    found = census.candidates(min_ms=0.0)
-    print("candidates:", found)
+    # One call: each speed-up that keeps the outputs exactly the same is tried, checked on the examples and timed.
+    # The model is changed in place, so `model` itself runs what is on.
+    fast = optimize(model, examples, say=lambda line: None)
+    for name in ("cuda_graphs", "whole_graph"):
+        switch = fast.report["switches"][name]
+        said = f"on, {switch.get('modules') or switch.get('call')}" if switch["on"] else f"off - {switch['why']}"
+        print(f"{name}: {said}")
 
-    # 2. Graph them in place. The model is not rebuilt: each module keeps its class, its weights and its hooks.
-    before = model(noise)
-    eager_ms = ms_per_run(model, noise)
-    cuda_graphs.install(model, [row["path"] for row in found])
-    model(noise)                                               # each new shape: run in eager mode, captured, checked
-
-    # 3. The outputs are the same, byte for byte, and on a GPU each run is faster.
-    after = model(noise)
-    print("same outputs, byte for byte:", cuda_graphs.same(before, after))
-    if device == "cuda":
-        print(f"eager {eager_ms:.2f} ms per run, graphed {ms_per_run(model, noise):.2f} ms per run")
-    else:
-        print(f"eager {eager_ms:.2f} ms per run; no CUDA GPU available, so nothing was graphed")
+    print("same outputs, byte for byte:", torch.equal(before, model(examples[0])))
+    if fast.on:
+        act = fast.report["act_ms"]
+        print(f"act {act['eager']:.2f} ms before, {act['optimized']:.2f} ms now")
 
 
 if __name__ == "__main__":

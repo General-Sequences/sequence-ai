@@ -1,15 +1,24 @@
 # How do I run π0 (openpi) on a remote GPU?
 
 Run openpi's own policy server on the GPU and openpi's own client on the robot, as openpi's guide describes.
-SequenceLink then changes the command that starts the server, and two lines on the robot: the server pings each robot
+SequenceLink then adds two lines to the server's script, and two on the robot: the server pings each robot
 and takes its pictures as JPEG, and the robot sends them that way and keeps its connection from going idle between
 action chunks.
 
 On the GPU, in openpi's repository. openpi's `docs/remote_inference.md` starts the server with
-`uv run scripts/serve_policy.py --env=DROID`, on port 8000; this runs the same script, unchanged:
+`uv run scripts/serve_policy.py --env=DROID`, on port 8000. Add two lines near the top of `scripts/serve_policy.py`,
+before it makes the server:
+
+```python
+from sequence_ai.network import openpi
+
+openpi.patch()        # openpi's server from here on: a ping each 100 ms, a JPEG picture handed over as its array
+```
+
+and start it as before, with sequence-ai in its environment:
 
 ```bash
-uv run --with sequence-ai python -m sequence_ai.network.openpi scripts/serve_policy.py --env=DROID
+uv run --with sequence-ai scripts/serve_policy.py --env=DROID
 ```
 
 On the robot:
@@ -32,15 +41,15 @@ pip install sequence-ai          # on the robot: no extra needed. The GPU's comm
 ```
 
 π0 and π0.5 are the models; openpi is the repository that serves them. Nothing of openpi's is replaced here: the
-client, the server, the msgpack layout and the responses stay openpi's own. A server started this way serves a robot
+client, the server, the msgpack layout and the responses stay openpi's own. A server patched this way serves a robot
 that sends arrays as before, and `keep()` needs nothing of the server; a robot that sends its pictures as JPEG needs the
-server started this way.
+server patched.
 
 ## What the lines do
 
 | Line | What it does | When it applies |
 |---|---|---|
-| `python -m sequence_ai.network.openpi`, on the GPU | openpi's server pings each connection every 100 ms, and hands its policy each picture sent as JPEG as the array it reads | always; a picture sent as an array reaches the policy as before |
+| `openpi.patch()`, on the GPU | openpi's server pings each connection every 100 ms while no inference runs, and hands its policy each picture sent as JPEG as the array it reads | always; a picture sent as an array reaches the policy as before |
 | `image_tools` from `sequence_ai.network.openpi`, on the robot | `resize_with_pad` fits each picture exactly as openpi's does, then returns it as base64 JPEG at quality 95; `convert_to_uint8` returns that as it is | always; the server must be started as above |
 | `openpi.keep(policy)`, on the robot | BBR as the socket's congestion control | Linux, with the kernel's BBR module loaded (`sudo modprobe tcp_bbr`) |
 | | TCP keepalive | every machine that takes the options |
@@ -58,9 +67,8 @@ JPEG makes the upload itself smaller: two 224 x 224 pictures are 301,056 bytes a
 `kept.bbr` reports whether the socket accepted BBR, `kept.congestion` which congestion control it now uses, and
 `kept.warm.pings` how many pings were answered. `kept.close()` stops the pings; the connection stays openpi's.
 
-In a server script of your own, call `openpi.patch()` before it makes openpi's `WebsocketPolicyServer`: that is what the
-command does before it runs `scripts/serve_policy.py`. `patch()` needs openpi's own `websocket_policy_server.py`; any
-other server is refused with `TypeError`.
+`openpi.patch()` runs before the script makes openpi's `WebsocketPolicyServer`, and needs openpi's own
+`websocket_policy_server.py`; any other server is refused with `TypeError`.
 
 ## Try it without a GPU or a checkpoint
 
@@ -72,7 +80,7 @@ speaks openpi's protocol, then runs openpi's real client against it with the one
 python examples/quickstart_openpi.py
 ```
 
-Run in a new environment with sequence-ai 0.62.0 and openpi-client 0.1.2, on a Mac, it printed:
+Run in a new environment with sequence-ai 0.64.1 and openpi-client 0.1.0, on a Mac, it printed:
 
 ```text
 BBR on its socket: False; TCP keepalive options accepted: 4
@@ -86,20 +94,40 @@ Twelve pings is four in each of the three half-second pauses. BBR is `False` bec
 
 Against a real openpi server, [`examples/openpi_robot.py`](../examples/openpi_robot.py) takes its host and port.
 
-## Or serve the policy with `serve()`
+## Or serve the policy as a class
 
-To serve several robots in batches, or to give the robot `connect()` in place of openpi's client, serve the policy with
-`sequence_ai.serve()` in openpi's environment on the GPU:
+To serve several robots in batches, or to give the robot `connect()` in place of openpi's client, write the policy as
+a class in openpi's environment on the GPU, and serve it there with `seq serve`. openpi's `download.maybe_download`
+fetches the `pi05_droid` checkpoint once, from the address openpi's README gives for it, into `~/.cache/openpi`
+(`OPENPI_DATA_HOME` moves it); `droid_policy.make_droid_example()` makes a random observation with DROID's keys and
+shapes, for the warm-up:
 
 ```python
-from openpi.policies import policy_config
+from openpi.policies import droid_policy, policy_config
+from openpi.shared import download
 from openpi.training import config as openpi_config
 
-import sequence_ai
-from sequence_ai.engine import openpi
+import seq
 
-policy_user = policy_config.create_trained_policy(openpi_config.get_config("pi05_droid"), checkpoint_dir_user)
-sequence_ai.serve(openpi.batched(policy_user), batch=[1, 2, 4, 8], example=observation_user)  # or serve(policy.infer)
+
+@seq.policy(hz=15, action_chunk_valid_len=15, action_chunk_replan_at=8)
+class Pi05Droid_user:
+    def __init__(self):
+        checkpoint_dir_user = download.maybe_download(pi05_droid_checkpoint_user)   # the address in openpi's README
+        self.policy_user = policy_config.create_trained_policy(openpi_config.get_config("pi05_droid"),
+                                                               checkpoint_dir_user)
+
+    @seq.sample
+    def sample_user(self):     # two 224x224 pictures, 7 joint positions, a gripper, a prompt: an act after each
+        return [("observe", droid_policy.make_droid_example()), ("act",)] * 3
+
+    @seq.infer
+    def infer_user(self, observation_user):
+        return self.policy_user.infer(observation_user)
+```
+
+```bash
+seq serve                    # in the policy's folder
 ```
 
 On the robot, the observation keeps openpi's keys, and `act()` returns what openpi's `infer()` returns:
@@ -107,24 +135,27 @@ On the robot, the observation keeps openpi's keys, and `act()` returns what open
 ```python
 import sequence_ai
 
-link_user = sequence_ai.connect("http://YOUR_GPU:8000")
+policy_user = sequence_ai.connect("http://YOUR_GPU:8000")
 # observation["observation/exterior_image_1_left"]: the frame
-action_chunk_user = link_user.act(observation_user)["actions"]
+policy_user.observe(observation_user)
+action_chunk_user = policy_user.act()["actions"]
 ```
 
-`openpi.batched(policy)` passes each observation through the policy's transforms, as `infer()` does, and samples all of
-them in one call, each with its own noise. The policy's JAX model compiles each listed batch size once, in the warm-up
-on `example`. A PyTorch checkpoint runs its observations one by one. Every default of [What is on by
-default](what-is-on-by-default.md) applies: the robot sends each 224×224 picture as JPEG, the server turns it back into
-the array the policy reads. At quality 95, JPEG moved π0.5's actions by 5.9% on average, a tenth of the policy's own
-run-to-run noise; `jpeg=False` sends exact pixels.
+Batched, the acts that wait reach `@seq.infer` together, and `batched(policy)`, in
+[`examples/serve_openpi_batched.py`](../examples/serve_openpi_batched.py), passes each observation through the policy's
+transforms, as `infer()` does, and samples all of them in one call, each with its own noise:
+[How do I use the inference components with openpi, LeRobot or GR00T?](how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md#openpi-and-lerobot-more-than-one-robot-on-a-gpu)
+has the class. The policy's JAX model compiles each listed batch size once, in the warm-up on its sample. A PyTorch
+checkpoint runs its observations one by one. Every default of [What is on by
+default](what-is-on-by-default.md) applies: the robot sends each 224×224 picture as a video keyframe of its own, and the
+server turns it back into the array the policy reads; `connect(url, pictures="exact")` sends exact pixels.
 
 ## Tested
 
 - **Verified:** `openpi.keep()` against openpi-client 0.1.2 on a local connection, as above and in
   `tests/network/test_openpi.py`.
-- **Verified:** `openpi.batched()` against stand-ins of openpi's model and transforms: one call to the model per
-  batch, each observation's own transforms and output (`tests/engine/test_openpi.py`).
+- **Verified:** `batched()` of `examples/serve_openpi_batched.py` against stand-ins of openpi's model and transforms:
+  one call to the model per batch, each observation's own transforms and output (`tests/engine/test_openpi.py`).
 - **Verified:** the server's pings and its decoding, and `image_tools`, against a server module built as openpi's
   `websocket_policy_server.py` is, on a local connection; and the command, against a script run as
   `scripts/serve_policy.py` is (`tests/network/test_openpi_server.py`).

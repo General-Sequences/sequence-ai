@@ -1,14 +1,19 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 General Sequences Company
 # SPDX-License-Identifier: Apache-2.0
 """
-python -m sequence_ai.check against two servers on this machine: one that runs its model on a thread of its own, says
-what it restores and how long its model took and hands out an example observation, and one that runs its model in its
-event loop and says nothing - and against no server, and a server that wants a token.
+python -m sequence_ai.check against serve() on this machine, reached as a robot reaches it - sequence_ai.connect(url),
+each act an observation handed over and the act after it, on the robot's stream: a server that runs its model on a
+thread of its own and hands out an example observation, one that runs its model in its event loop and says nothing of
+how long it took, one whose ping does not say what it is, one that takes no robot's stream - and against no server, a
+server that wants a token, and a string that is no address.
 """
-import asyncio
-import json
-import re
+from __future__ import annotations
+
+import contextlib
+import os
+import socket
 import sys
+import threading
 import time
 
 import numpy as np
@@ -16,58 +21,74 @@ import pytest
 
 pytest.importorskip("httpx")
 pytest.importorskip("uvicorn")
-pytest.importorskip("PIL")
+pytest.importorskip("sequence_base")         # the robot's stream: serve() takes it where sequence-base is installed
 
 from sequence_ai import check  # noqa: E402
-from sequence_ai.network import compressed, frames, msgpack_io  # noqa: E402
-from tests.network.test_link import frame, serving  # noqa: E402
+from sequence_ai.engine import serve as serving  # noqa: E402
 
 MODEL_S = 0.15
+ACTS = ("pings in inference", "server time", "first act")      # the lines that send an act
 
 
-class Server:
-    def __init__(self, *, good: bool, token=None, ping: int = 404, says_who: bool = True) -> None:
-        self.good, self.token, self.ping, self.says_who = good, token, ping, says_who
-
-    async def __call__(self, scope, receive, send) -> None:
-        body = b""
-        while True:
-            message = await receive()
-            body += message.get("body", b"")
-            if not message.get("more_body"):
-                break
-        path, headers, status, content = scope["path"], [], 200, b""
-        if self.good:
-            headers.append((b"x-seq-reads", b"jpeg, zstd, zlib"))
-            if self.says_who:
-                headers.append((b"x-seq-server", b"sequence-ai/0.63.0"))
-        if self.token and dict(scope["headers"]).get(b"authorization") != f"Bearer {self.token}".encode():
-            status = 401
-        elif path == "/ping":
-            status = 200 if self.good else self.ping
-            if self.good and self.says_who:
-                headers.append((b"content-type", b"application/json"))
-                content = json.dumps({"server": "sequence-ai", "version": "0.63.0", "up_s": 120.0, "pid": 4242,
-                                      "policy": "toy"}).encode()
-        elif path == "/example" and self.good:
-            content = msgpack_io.pack(observation())
-        elif path == "/act":
-            msgpack = frames.unpack_pictures(compressed.expand(msgpack_io.unpack(body), limit=64 << 20)[0])
-            if self.good:
-                await asyncio.to_thread(time.sleep, MODEL_S)         # the model on a thread of its own
-                headers.append((b"server-timing", f"act;dur={MODEL_S * 1000:.1f}".encode()))
-            else:
-                time.sleep(MODEL_S)                                  # the model in the event loop: nothing answers
-            content = msgpack_io.pack({"actions": np.zeros((8, 7), np.float32), "seen": list(msgpack)})
-        else:
-            status = 404
-        await send({"type": "http.response.start", "status": status,
-                    "headers": headers + [(b"content-length", str(len(content)).encode())]})
-        await send({"type": "http.response.body", "body": content})
+def model(observation: dict) -> dict:
+    """The policy: MODEL_S of work, then a chunk of actions."""
+    time.sleep(MODEL_S)
+    return {"actions": np.zeros((8, 7), np.float32)}
 
 
 def observation() -> dict:
-    return {"image": frame(), "state": np.arange(7, dtype=np.float32)}
+    """A robot's observation: a camera frame, channels first, and the arm's state."""
+    return {"image": np.zeros((3, 96, 96), np.uint8), "state": np.arange(7, dtype=np.float32)}
+
+
+class Silent(serving.App):
+    """serve() as a server of another kind may be written: its model run in its event loop, so nothing else - a ping,
+    anything on a robot's stream - is answered while it runs, and its answers say nothing of how long it took (no
+    handler_ms in their perf)."""
+
+    async def _run(self, items: list) -> list:
+        dispatched = time.perf_counter()
+        return [(output, took, dispatched, len(items)) for output, took in self._call(items)]
+
+    async def _policy_on(self, observation, **said) -> tuple:
+        return await super()._policy_on(observation, **{**said, "began": None})
+
+
+class Anonymous:
+    """serve() behind a ping of another program's: 200, and nothing said of what it is or of the robot's stream."""
+
+    def __init__(self, app: serving.App) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http" and scope["path"] == check.PING:
+            await send({"type": "http.response.start", "status": 200,
+                        "headers": [(b"content-type", b"text/plain"), (b"content-length", b"4")]})
+            await send({"type": "http.response.body", "body": b"pong"})
+            return
+        await self.app(scope, receive, send)
+
+    def close(self) -> None:
+        self.app.close()
+
+
+@contextlib.contextmanager
+def serving_on(app):
+    """`app` on a port of this machine, as serve() runs it: its address while it runs."""
+    server = serving._uvicorn(app, "warning")
+    sockets = serving._listen("127.0.0.1", 0)
+    thread = threading.Thread(target=server.run, kwargs={"sockets": sockets}, daemon=True)
+    thread.start()
+    try:
+        for _ in range(500):
+            if server.started:
+                break
+            time.sleep(0.01)
+        yield serving._url(sockets[0])
+    finally:
+        server.should_exit = True
+        thread.join(10)
+        app.close()
 
 
 @pytest.fixture(autouse=True)
@@ -82,47 +103,78 @@ def by_name(rows) -> dict:
 
 
 def test_a_server_that_does_it_all_has_every_line_ok_with_its_own_example():
-    with serving(Server(good=True)) as url:
+    with serving_on(serving.App(model, example=observation())) as url:
         rows, status = check.run(url, pings=5)
     got = by_name(rows)
-    for name in ("server", "round trip", "pings when idle", "pings in inference", "pictures as JPEG", "compression",
-                 "server time", "first act"):
+    for name in ("server", "round trip", "pings when idle", *ACTS):
         assert got[name].status == "ok", got[name]
-    assert "jpeg, zlib, zstd" in got["server"].detail and "GET /example" in got["first act"].detail
-    assert got["server"].detail.startswith("sequence-ai 0.63.0, pid 4242, up 2.0 min, policy toy;")
-    assert "1 in this observation" in got["pictures as JPEG"].detail
-    assert status == 0
+    server, idle = got["server"].detail, got["pings when idle"].detail
+    assert server.startswith(f"sequence-ai {serving._version()}, pid {os.getpid()}, up ")
+    # the speed-ups its warm-up kept (engine.optimize): none, a model with no torch module and no jax.jit function
+    assert server.endswith(", policy model, no speed-up on; it answers /ping with 200 and takes the robot's stream "
+                           "(x-seq-stream/3)")
+    assert "after each 100.0 ms of idle time" in idle and "until 60 s after its last observation or act" in idle
+    assert "the server says it took" in got["server time"].detail and "GET /example" in got["first act"].detail
+    assert not {"pictures as JPEG", "compression"} & set(got) and status == 0
 
 
 def test_a_server_that_runs_its_model_in_its_event_loop_and_says_nothing_has_those_lines_no():
-    with serving(Server(good=False)) as url:
+    with serving_on(Silent(model)) as url:
         rows, status = check.run(url, observation=observation(), pings=5)
     got = by_name(rows)
     assert got["pings in inference"].status == "no" and "held while the model ran" in got["pings in inference"].detail
-    for name in ("server", "pings when idle", "pictures as JPEG", "compression", "server time"):
-        assert got[name].status == "no", got[name]
-    assert re.search(r"would go from 230,\d{3} to \d", got["pictures as JPEG"].detail) and status == 1
+    assert got["server time"].status == "no" and "no handler_ms" in got["server time"].detail
+    assert got["server"].status == "ok" and "--observation" in got["first act"].detail and status == 1
 
 
 def test_no_observation_and_no_example_says_what_the_act_lines_need():
-    with serving(Server(good=False)) as url:
-        rows, _ = check.run(url, pings=2)
+    with serving_on(serving.App(model)) as url:
+        rows, status = check.run(url, pings=2)
     got = by_name(rows)
-    assert got["pings in inference"].status == "--" and "--observation" in got["pings in inference"].detail
+    for name in ACTS:
+        assert got[name].status == "--" and "--observation" in got[name].detail
+    assert status == 0
 
 
-def test_no_server_and_a_server_that_wants_a_token_end_with_status_2_and_say_why():
+def test_no_server_a_server_that_wants_a_token_and_no_address_end_with_status_2_and_say_why():
     rows, status = check.run("http://127.0.0.1:9", wait_s=0.3)
-    assert status == 2 and rows[0].name == "server" and "not ready" in rows[0].detail
-    with serving(Server(good=True, token="s3cret")) as url:
-        rows, status = check.run(url, wait_s=5.0)
-        assert status == 2 and "--token" in rows[0].detail
+    assert status == 2 and rows == [check.Row("no", "server", "http://127.0.0.1:9 was not ready in 0.3 s: nothing "
+                                                              "answered")]
+    with serving_on(serving.App(model, token="s3cret", example=observation())) as url:
+        began = time.monotonic()
+        rows, status = check.run(url, wait_s=30.0)
+        assert status == 2 and rows[0].detail == "refused this machine's ping (401): give it with --token"
+        assert time.monotonic() - began < 5.0                # said at once: a refusal is not waited out
+        rows, status = check.run(url, token="not-it", wait_s=30.0)
+        assert status == 2 and rows[0].detail == "refused this machine's ping (401)"
         rows, status = check.run(url, token="s3cret", pings=2)
-        assert status == 0
+        assert status == 0 and by_name(rows)["first act"].status == "ok", rows
+    rows, status = check.run("127.0.0.1:8000")
+    assert status == 2 and rows[0].detail == "127.0.0.1:8000 is not an address: give it as http://<host>:<port>"
+
+
+def test_a_refusal_is_said_as_soon_as_the_server_listens_not_at_the_end_of_the_wait():
+    with socket.socket() as free:                       # a port with nothing on it: a connect there is refused at once
+        free.bind(("127.0.0.1", 0))
+        port = free.getsockname()[1]
+    app = serving.App(model, token="s3cret")
+    server = serving._uvicorn(app, "warning")
+    starts = threading.Timer(1.0, lambda: server.run(sockets=serving._listen("127.0.0.1", port)))
+    starts.daemon = True
+    starts.start()
+    try:
+        began = time.monotonic()
+        rows, status = check.run(f"http://127.0.0.1:{port}", wait_s=30.0)
+        assert status == 2 and rows[0].detail == "refused this machine's ping (401): give it with --token"
+        assert 1.0 <= time.monotonic() - began < 10.0        # after the server came up, long before the wait's end
+    finally:
+        server.should_exit = True
+        starts.join(10)
+        app.close()
 
 
 def test_main_prints_one_line_a_check_and_exits_with_its_status(capsys):
-    with serving(Server(good=True)) as url:
+    with serving_on(serving.App(model, example=observation())) as url:
         with pytest.raises(SystemExit) as ended:
             check.main([url])
     out = capsys.readouterr().out
@@ -130,11 +182,51 @@ def test_main_prints_one_line_a_check_and_exits_with_its_status(capsys):
     assert "  ok  pings in inference" in out
 
 
+def test_the_flags_of_the_http_path_are_gone(capsys):
+    for gone in (["--lines", "eth0,wwan0"], ["--act-path", "/act"], ["--ping-path", "/ping"]):
+        with pytest.raises(SystemExit) as ended:
+            check.main(["http://127.0.0.1:9", *gone])
+        assert ended.value.code == 2 and "unrecognized arguments" in capsys.readouterr().err
+
+
 def test_a_server_that_answers_its_ping_but_does_not_say_it_is_serve_may_be_another_program():
-    with serving(Server(good=True, says_who=False)) as url:
-        rows, status = check.run(url, pings=2)
+    with serving_on(Anonymous(serving.App(model))) as url:
+        rows, status = check.run(url, observation=observation(), pings=2)
     server = by_name(rows)["server"]
-    assert server.status == "no" and "another program answers at this address" in server.detail and status == 1
+    assert server.status == "no" and "is not one serve() runs" in server.detail and status == 2
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")         # wait_until_ready() warns that the stream did not open
+class _NoStream:
+    """A server that answers /ping as serve() does and takes no robot's stream: X-Seq-Server on its answers, no
+    X-Seq-Act-Formats."""
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return
+        if scope["path"] == "/example":                              # its example, as serve() hands one out
+            from sequence_ai.network import msgpack_io
+
+            body, kind = msgpack_io.pack(observation()), msgpack_io.MEDIA_TYPE.encode()
+        else:
+            body, kind = b'{"server": "sequence-ai", "version": "0", "policy": "model"}', b"application/json"
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [(b"content-type", kind), (b"content-length", str(len(body)).encode()),
+                                (b"x-seq-server", b"sequence-ai/0")]})
+        await send({"type": "http.response.body", "body": body})
+
+    def close(self):
+        pass
+
+
+def test_a_server_that_takes_no_robots_stream_says_so_and_sends_no_act():
+    with serving_on(_NoStream()) as url:
+        rows, status = check.run(url, pings=2)
+    got, said = by_name(rows), "does not take the robot's stream (no x-seq-stream/3 in X-Seq-Act-Formats)"
+    assert got["server"].status == "no" and said in got["server"].detail
+    for name in ACTS:
+        assert got[name] == check.Row("--", name, "needs a server that takes the robot's stream")
+    assert status == 1
 
 
 def test_on_macos_the_wi_fi_line_says_it_was_not_checked_and_whether_the_machine_is_on_wi_fi(monkeypatch):

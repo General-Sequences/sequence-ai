@@ -5,9 +5,9 @@ Quickstart: five robots send requests at the same time, their requests reach the
 in its own process. Standard library only: no GPU and no torch needed to see it work.
 
     pip install sequence-ai
-    python quickstart.py
+    python quickstart_batching.py
 
-Put your model where `model_on_a_list_user` is. docs/quickstart.md walks through it.
+Put your model where `model_on_a_list_user` is. docs/quickstart-inference.md walks through it.
 """
 import asyncio
 import os

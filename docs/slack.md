@@ -55,10 +55,11 @@ the margin before that.
   request is in time also depends on the batches it arrives behind. `slack` runs 2, 3 and more robots on a simulated
   clock, as the loop below serves them: from starts spread evenly over every way their requests can fall in a cycle
   (64 for two robots, 128 for more), each until the run repeats or for 48 cycles. A number of robots is within
-  capacity when at least 95% of their responses are back before their robot's buffer runs out, each start counting
-  the same, and in no start do the batches fill more than 0.9 of a cycle (the load: what the batches typically take
-  for each request, with one request from each robot in a cycle). Robots' clocks drift, so over a long run a fleet
-  meets every way its requests can fall, and the share over the starts is the share of that run. The first number
+  capacity when no response is late in any start, and in no start do the batches fill more than 0.9 of a cycle (the
+  load: what the batches typically take for each request, with one request from each robot in a cycle). Each episode
+  a robot's loop starts again from the moment it is called, and robots' clocks drift, so a fleet can spend a whole
+  episode in any of the ways its requests can fall. `worst=False` asks instead for 95% of the responses back in time
+  over the starts, each start counting the same. The first number
   that fails ends the count: robots are admitted one at a time, so a replica reaches a number of robots through
   every smaller one. The clock rounds each batch time up by 3% at most and each RTT up to 10 ms, and keeps each
   verdict by them: a server's timings move by a few ms from one request to the next, and rounded they ask a question
@@ -82,6 +83,21 @@ the margin before that.
   delay. Its robot may run out of actions, and waits.
 
 ## In a server
+
+`serve()` runs this loop for you. Tell it how a robot plays an answer, and give it an example to time the batches:
+
+```python
+sequence_ai.serve(policy_on_a_list_user, batch=[1, 2, 4], example=observation_user,
+                  hz=20, action_chunk_valid_len=15, action_chunk_replan_at=8)
+```
+
+Each robot's `connect()` then names it on every request and reports its round trip and what is left of its chunk.
+The server holds each request only as long as that robot's chunk allows, and seats a robot at its first act only if
+every seated robot stays in time however their requests fall. Any other robot gets a 503 that says why. Without `hz`,
+no request waits for another: a batch is what waited while the policy ran.
+[`examples/fleet_on_serve.py`](../examples/fleet_on_serve.py) runs four robots in front of it.
+
+For a server of your own, the loop is:
 
 ```python
 from sequence_ai.engine import slack
@@ -107,10 +123,10 @@ loop in about fifty lines, on a simulated clock.
 
 | In the file | What it provides |
 |---|---|
-| `measure`, `Table`, `Served`, `SizeFailed` | the time a batch of each listed size takes |
+| `measure`, `Table`, `Served`, `SizeFailed` | the time a batch of each listed size takes, and its GPU memory where the server measured it (`Table.vram_mb`) |
 | `playback` | a policy's `hz`, N and k as `play_s`, `buffer_s`, `step_s` (and `wait_s`) |
 | `per_replica` | the capacity of a replica whose robots all have the same RTT |
-| `in_time`, `on_a_clock`, `starts` | whether robots with these RTTs are answered in time, over the starts; one run on the clock; the starts a number of robots is run from |
+| `in_time`, `on_a_clock`, `starts`, `kept_only` | whether robots with these RTTs are answered in time, over the starts; one run on the clock; the starts a number of robots is run from; on one thread, answer only the verdicts already kept and raise `NotKept` for the rest, so a server's loop never runs the clock |
 | `Seating` | `fit`: the largest batch that answers one robot in time; `seat`: the capacity, and which robots are over it |
 | `Aligner` | `arrived`, `hold_s`, `split`, `answered`, `left`, `due`, `outsides_ms`, `replay` |
 | `outside_ms`, `left_ms` | what a robot reported, parsed as an integer number of ms, or `None` |
@@ -120,8 +136,8 @@ loop in about fifty lines, on a simulated clock.
 [`batcher`](../sequence_ai/engine/batcher.py) dispatches a batch when it is full, or `wait_ms` after its first call: one
 wait for every caller, and no notion of a robot. `slack` answers the two questions that leaves open: how many robots
 a replica can serve at all, and, for the requests waiting now, how long they may still wait and which are dispatched
-first. They are two components, each used alone, and `Batcher` does not call `Aligner`: a server that batches by
-slack runs its own loop, as the example does.
+first. They are two components, each used alone. `Batcher` takes a `hold` and a `first` function in place of
+`wait_ms`; `serve()` passes it `Aligner.hold_s` and `Aligner.split`, and a server of your own can do the same.
 
 ## Measured
 
@@ -132,16 +148,13 @@ serving stack it was taken from.
   model's batched call, with simulated robots: 15 valid steps, the next request at the 8th, 60 s per cell. At 15 Hz
   (a 467 ms buffer; batches of 1, 2 and 3 in 195, 312 and 429 ms) `per_replica` computed a capacity of 2: 2 robots
   had no late response, 3 had 21% and 26%, and 4 had 99%. At 20 Hz (350 ms) it computed 1, and 2 robots had 40% and
-  90% late. The server admitted every robot, so the cells above the capacity show what `seat()` prevents. Batching
-  added no capacity on this model and GPU: openpi's own server, one request at a time, served the same 2 robots.
+  90% late. The server admitted every robot, so the cells above the capacity show what `seat()` prevents.
   `per_replica` then computed the load by a formula. On a clock, as now, those capacities are the same, for robots
   20, 50 or 100 ms away.
-  [How many robots can one GPU serve?](how-many-robots-can-one-gpu-serve.md#checked-on-a-real-model) has every cell.
 - **The capacity, on three models.** One L4, simulated robots of a 15 Hz policy 20 ms away, 60 s per cell, with the load
   computed by that formula. For π0.5 and GR00T N1.6 it computed 2, and 2 robots had no late response (0.4% in one cell
   of eight). For SmolVLA (batches of 1, 2, 4 and 8 in 256, 273, 303 and 377 ms) it computed 8, and 4 robots had 95% and
-  97% of their responses late, 8 had 99%. Computed on a clock, the three capacities are 2, 2 and 1: [Why the capacity is
-  computed on a clock](how-many-robots-can-one-gpu-serve.md#why-the-capacity-is-computed-on-a-clock).
+  97% of their responses late, 8 had 99%. Computed on a clock, the three capacities are 2, 2 and 1.
 - **The capacity on a clock, on a model.** SmolVLA on one L4 again, the same policy and test server, simulated robots
   about 30 ms away. The clock gave a capacity of 1, by the load: two robots' batches fill more than 0.9 of a cycle
   where each request runs alone. Two robots, one more than the capacity, had no late response in 226 (their
@@ -228,7 +241,7 @@ Sequences serves with. It has not been compared with either.
 | `MAX_ROBOTS_PER_REPLICA` | 64 | the most robots a replica serves, however fast it is |
 | `CLOCK_CYCLES`, `CLOCK_WARM` | 48, 8 | the cycles a start is run for on the clock, and how many of the first are not counted |
 | `CLOCK_STARTS` | 128 | the starts a number of robots is run from on the clock; half as many for two robots |
-| `IN_TIME_MIN` | 0.95 | the share of a fleet's responses that must be back before their buffer runs out, over the starts |
+| `IN_TIME_MIN` | 0.95 | with `worst=False`, the share of a fleet's responses that must be back before their buffer runs out, over the starts; by default none may be late in any start |
 | `CLOCK_BITS`, `CLOCK_RTT_MS` | 6, 10 | the clock's resolution: a batch time rounded up to 6 significant bits (3% at most), an RTT up to 10 ms |
 | `WINDOW` | 64 | the runs kept for each batch size |
 | `RUNS` | 3 | the timed runs of each size, after one untimed |

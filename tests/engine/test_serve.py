@@ -1,11 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 General Sequences Company
 # SPDX-License-Identifier: Apache-2.0
 """
-serve() and its app (sequence_ai/engine/serve.py): an observation in and the policy's output out, as msgpack, with what
-the robot compressed or sent as JPEG restored first; the policy on one thread of its own, one call at a time, or on a
-batch of the observations waiting; /ping answered while the policy runs, and 503 until the warm-up on the example is
-done; the token; a body over the limit, one that is not msgpack, a policy that raises or returns what cannot be sent;
-torch and JAX outputs as numpy; the listening sockets; and the server on a real port, with connect() on the robot side.
+serve() and its app (sequence_ai/engine/serve.py), reached as a robot reaches it: an observation posted as it is made
+(POST /observe) and the act after it (POST /act), answered with the policy's output and the server's time, in msgpack;
+the policy on one thread of its own, one call at a time, or on a batch of the observations waiting; /ping answered
+while the policy runs, and 503 until the warm-up on the example is done; what every response says the server is; the
+token; a body over the limit or one that does not read, a policy that raises or returns what cannot be sent; torch and
+JAX outputs as numpy; the listening sockets; and the server on a real port. serve() needs sequence-base (Python 3.10 or
+later): skipped where it is not installed.
 
     python -m pytest -q tests/engine/test_serve.py
 """
@@ -13,9 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import json
 import os
-import re
 import socket
 import threading
 import time
@@ -25,7 +27,14 @@ import pytest
 
 from sequence_ai.engine import serve as serving
 from sequence_ai.engine.serve import App
-from sequence_ai.network import compressed, frames, msgpack_io
+from sequence_ai.network import msgpack_io
+
+pytest.importorskip("sequence_base")         # serve() takes each robot's stream, which needs sequence-base
+
+# what a robot's requests carry: its observations in msgpack, its act in JSON, the act's answer asked for in msgpack
+_OBSERVE = [("Content-Type", msgpack_io.MEDIA_TYPE)]
+_ACT = [("Content-Type", "application/json"), ("Accept", msgpack_io.MEDIA_TYPE)]
+_EPISODES = itertools.count()                # each _act() an episode of its own
 
 
 def _run(coroutine, timeout: float = 10.0):
@@ -55,79 +64,62 @@ async def _request(app: App, method: str, path: str, body: bytes = b"", *, heade
             b"".join(m.get("body", b"") for m in rest))
 
 
+def _observed(episode: str, observation) -> bytes:
+    """A POST /observe body as a robot sends it: `observation`, the first of `episode`, in msgpack."""
+    return msgpack_io.pack({"episode_id": episode, "frames": [{"seq": 0, "inputs": observation}], "skipped": []})
+
+
+def _act_call(episode: str) -> bytes:
+    """The POST /act body of the act after that observation: one observation of `episode` came before it."""
+    return json.dumps({"call": "act", "episode_id": episode, "seq": 1}).encode()
+
+
 async def _act(app: App, observation, headers=()):
-    return await _request(app, "POST", "/act", msgpack_io.pack(observation), headers=headers)
+    """`observation` as a robot sends it - posted as the first of an episode of its own, then the act after it, each
+    request with `headers` - and the act's (status, headers, body), a 200's body the policy's output alone, in msgpack;
+    the post's answer where the post is refused."""
+    episode = f"e-{next(_EPISODES)}"
+    posted = await _request(app, "POST", "/observe", _observed(episode, observation), headers=[*_OBSERVE, *headers])
+    if posted[0] != 200:
+        return posted
+    status, said, body = await _request(app, "POST", "/act", _act_call(episode), headers=[*_ACT, *headers])
+    if status == 200:
+        body = msgpack_io.pack(msgpack_io.unpack(body)["outputs"])
+    return status, said, body
 
 
-def _picture(seed: int = 0) -> np.ndarray:
-    """A 64 x 48 frame with detail in it, so that JPEG changes its values a little."""
+def _picture() -> np.ndarray:
+    """A 64 x 48 camera frame, with detail in it."""
     y, x = np.mgrid[0:48, 0:64]
-    return np.stack([(x * 4 + seed) % 256, (y * 5 + 2 * seed) % 256, (x + y) * 2 % 256], axis=-1).astype(np.uint8)
+    return np.stack([(x * 4) % 256, (y * 5) % 256, (x + y) * 2 % 256], axis=-1).astype(np.uint8)
 
 
 # ── an observation in, the output out ──────────────────────────────────────────────────────────────────────────────
-def test_an_observation_in_and_the_policys_output_out_with_the_servers_time_and_what_it_reads():
+def test_an_observation_posted_and_the_act_after_it_get_the_policys_output_and_the_servers_time():
     def policy(observation):
         return {"actions": np.full((8, 7), observation["state"].sum(), dtype=np.float32), "note": "ok"}
+
+    observation = {"state": np.arange(4, dtype=np.float32)}
 
     async def go():
         app = App(policy)
         try:
-            return await _act(app, {"state": np.arange(4, dtype=np.float32)})
+            posted = await _request(app, "POST", "/observe", _observed("e-first", observation), headers=_OBSERVE)
+            return posted, await _request(app, "POST", "/act", _act_call("e-first"), headers=_ACT)
         finally:
             app.close()
 
-    status, headers, body = _run(go())
-    assert status == 200
-    assert headers["content-type"] == msgpack_io.MEDIA_TYPE
-    out = msgpack_io.unpack(body)
+    (posted, posted_headers, through), (status, headers, body) = _run(go())
+    assert posted == 200 and posted_headers["content-type"] == "application/json"
+    assert json.loads(through) == {"through": 0}               # the episode is whole through its first observation
+    assert status == 200 and headers["content-type"] == msgpack_io.MEDIA_TYPE
+    answer = msgpack_io.unpack(body)
+    out = answer["outputs"]
     assert out["note"] == "ok" and out["actions"].shape == (8, 7) and float(out["actions"][0, 0]) == 6.0
-    # the time from the request's last byte to its response first: what connect() takes off the round trip
-    assert re.fullmatch(r"act;dur=\d+\.\d, model;dur=\d+\.\d", headers["server-timing"]), headers["server-timing"]
-    assert headers["x-seq-reads"] == "jpeg, zstd, zlib, once, split"
-
-
-def test_what_the_server_says_it_reads_follows_its_switches():
-    async def go(**switches):
-        app = App(lambda o: 1, **switches)
-        try:
-            return (await _request(app, "GET", "/ping"))[1]["x-seq-reads"]
-        finally:
-            app.close()
-
-    # and, whatever the switches, that it runs an act's copies once (network.lines)
-    assert _run(go(jpeg=False)) == "zstd, zlib, once, split"
-    assert _run(go(compress=False)) == "jpeg, once, split"
-    assert _run(go(jpeg=False, compress=False)) == "once, split"
-
-
-def test_pictures_sent_as_jpeg_and_arrays_sent_compressed_reach_the_policy_as_the_arrays_they_were():
-    got = {}
-
-    def policy(observation):
-        got.update(observation)
-        return 0
-
-    picture = _picture()
-    joints = np.linspace(0, 1, 5000).astype(np.float32)
-    sent, count = frames.pack_pictures({"camera": {"wrist": picture}})
-    assert count == 1
-    sent["joints"] = compressed.compress(joints)
-
-    async def go():
-        app = App(policy, jpeg=False, compress=False)     # restored all the same: the switches change what it says
-        try:
-            return await _act(app, sent)
-        finally:
-            app.close()
-
-    status, _, _ = _run(go())
-    assert status == 200
-    wrist = got["camera"]["wrist"]
-    assert isinstance(wrist, np.ndarray) and wrist.shape == (48, 64, 3) and wrist.dtype == np.uint8
-    assert not np.array_equal(wrist, picture)                                     # JPEG: close, not equal
-    assert np.abs(wrist.astype(int) - picture.astype(int)).mean() < 4
-    assert np.array_equal(got["joints"], joints)                                  # compressed: byte for byte
+    # the server's time, in the answer: from the act's last byte to its answer, which the robot takes off its round
+    # trip, and the policy call's, within it
+    perf = answer["perf"]
+    assert sorted(perf) == ["handler_ms", "inference_ms"] and 0 <= perf["inference_ms"] <= perf["handler_ms"]
 
 
 def test_the_policys_arrays_are_its_own_to_write_into():
@@ -138,18 +130,16 @@ def test_the_policys_arrays_are_its_own_to_write_into():
         observation["camera"][0][0, 0, 0] = 1
         return {"state": observation["state"], "writable": observation["camera"][0].flags.writeable}
 
-    sent, _ = frames.pack_pictures({"state": np.zeros(3, dtype=np.float32), "camera": [_picture()]})
-
     async def go():
         app = App(policy)
         try:
-            return await _act(app, sent)
+            return await _act(app, {"state": np.zeros(3, dtype=np.float32), "camera": [_picture()]})
         finally:
             app.close()
 
     status, _, body = _run(go())
-    out = msgpack_io.unpack(body)
     assert status == 200, body
+    out = msgpack_io.unpack(body)
     assert out["state"].tolist() == [9.0, 0.0, 0.0] and out["writable"] is True
 
 
@@ -183,9 +173,10 @@ def test_the_policy_runs_one_call_at_a_time_on_one_thread_of_its_own():
 
 
 def test_a_ping_is_answered_while_the_policy_runs():
-    gate = threading.Event()
+    started, gate = threading.Event(), threading.Event()
 
     def policy(observation):
+        started.set()
         gate.wait(5)
         return 1
 
@@ -193,10 +184,11 @@ def test_a_ping_is_answered_while_the_policy_runs():
         app = App(policy)
         try:
             acting = asyncio.ensure_future(_act(app, {"x": 1}))
-            await asyncio.sleep(0.05)                      # the act is in the policy's thread, which waits on the gate
-            started = time.perf_counter()
+            while not started.is_set():                    # the act is in the policy's thread, which waits on the gate
+                await asyncio.sleep(0.005)
+            began = time.perf_counter()
             pinged = await _request(app, "GET", "/ping")
-            took = time.perf_counter() - started
+            took = time.perf_counter() - began
             assert not acting.done()
             gate.set()
             return pinged, took, await acting
@@ -228,6 +220,8 @@ def test_every_response_says_it_is_serve_and_the_ping_says_more():
     version = serving._version()
     for _, headers, _ in answers:
         assert headers["x-seq-server"] == f"sequence-ai/{version}"
+        # and how a robot sends to it: on its stream, the policy reading each act's newest observation
+        assert headers["x-seq-act-formats"] == f"{serving.STREAM_FORMAT}, {serving.LATEST_FORMAT}"
     (_, _, refused_body), (status, headers, body) = answers[0], answers[1]
     said = json.loads(body)
     assert status == 200 and headers["content-type"] == "application/json"
@@ -304,13 +298,14 @@ def test_with_batch_the_observations_waiting_reach_the_policy_as_one_list_and_ea
         return [{"i": o["i"], "twice": o["i"] * 2} for o in observations]
 
     async def go():
-        app = App(policy_on_a_list, batch=[1, 2, 4], wait_ms=1.0)
+        app = App(policy_on_a_list, batch=[1, 2, 4])
         try:
             first = asyncio.ensure_future(_act(app, {"i": 0}))
             while not seen:                                # the first observation is in the policy, alone
                 await asyncio.sleep(0.005)
             rest = [asyncio.ensure_future(_act(app, {"i": i})) for i in range(1, 6)]
-            await asyncio.sleep(0.05)                      # five more wait while the policy runs
+            while len(app._batcher._open) < 5:             # five more wait while the policy runs
+                await asyncio.sleep(0.005)
             gate.set()
             answers = await asyncio.gather(first, *rest)
             return [msgpack_io.unpack(body) for _, _, body in answers], dict(app._batcher.sent)
@@ -329,24 +324,35 @@ def test_with_batch_the_observations_waiting_reach_the_policy_as_one_list_and_ea
     (lambda os: [], "returned 0 outputs for a batch of 1: one output for each observation"),
 ])
 def test_a_batch_function_that_returns_other_than_one_output_for_each_observation_is_told_so(returned, said):
-    sizes = []
+    sizes, gate = [], threading.Event()
 
     def policy_on_a_list(observations):
         sizes.append(len(observations))
+        if len(sizes) == 1:
+            gate.wait(5)                        # the first act holds the policy while two more wait: a batch of 2
         return returned(observations)
 
     async def go():
         app = App(policy_on_a_list, batch=[1, 2])
         try:
-            return await asyncio.gather(_act(app, {"i": 1}), _act(app, {"i": 2}))
+            first = asyncio.ensure_future(_act(app, {"i": 0}))
+            for _ in range(500):
+                if sizes:
+                    break
+                await asyncio.sleep(0.01)
+            rest = [asyncio.ensure_future(_act(app, {"i": i})) for i in (1, 2)]
+            await asyncio.sleep(0.2)
+            gate.set()
+            return await asyncio.gather(first, *rest)
         finally:
             app.close()
 
     answers = _run(go())
-    # the batch of 2 failed, so each observation was run again alone, and failed alone, saying why
-    assert sizes == [2, 1, 1]
+    # the first alone; the batch of the 2 that waited for it failed, so each was run again alone, and failed alone, saying
+    # why
+    assert sizes == [1, 2, 1, 1]
     for status, _, body in answers:
-        assert status == 500 and said in body.decode()
+        assert status == 500 and said in json.loads(body)["detail"]
 
 
 # ── warm-up ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -357,8 +363,7 @@ def test_the_warm_up_runs_the_example_twice_at_each_batch_size_and_ping_says_503
     def policy_on_a_list(observations):
         gate.wait(5)
         image = observations[0]["image"]
-        seen.append((len(observations), image.flags.writeable, np.array_equal(image, example["image"]),
-                     bool(np.abs(image.astype(int) - example["image"]).mean() < 4)))
+        seen.append((len(observations), image.flags.writeable, np.array_equal(image, example["image"])))
         return [{"actions": np.zeros(3)} for _ in observations]
 
     async def go():
@@ -378,9 +383,9 @@ def test_the_warm_up_runs_the_example_twice_at_each_batch_size_and_ping_says_503
     (status, headers, body), (ready_status, _, _), (example_status, example_headers, example_body) = _run(go())
     assert status == 503 and headers["retry-after"] == "1" and b"warming up" in body
     assert ready_status == 200
-    # twice at each size, on the example as a robot's observation reaches the policy: its own arrays, its picture sent
-    # as JPEG and restored (close to the example's, not equal)
-    assert seen == [(1, True, False, True), (1, True, False, True), (2, True, False, True), (2, True, False, True)]
+    # twice at each size, on the example as a robot's observation reaches the policy: read back from msgpack, the
+    # example's arrays as they were, each the policy's own
+    assert seen == [(1, True, True), (1, True, True), (2, True, True), (2, True, True)]
     assert example_status == 200 and example_headers["content-type"] == msgpack_io.MEDIA_TYPE
     assert np.array_equal(msgpack_io.unpack(example_body)["image"], example["image"])
 
@@ -426,7 +431,7 @@ def test_an_output_that_cannot_be_sent_fails_the_warm_up_not_the_first_robot():
     assert isinstance(failure, msgpack_io.MsgpackError) and "object cannot be sent as msgpack" in str(failure)
 
 
-def test_without_an_example_the_server_is_ready_at_once_and_has_none_to_hand_out():
+def test_without_an_example_the_server_is_ready_at_once_has_none_to_hand_out_and_says_what_that_leaves_out(caplog):
     async def go():
         app = App(lambda o: 1)
         try:
@@ -434,8 +439,11 @@ def test_without_an_example_the_server_is_ready_at_once_and_has_none_to_hand_out
         finally:
             app.close()
 
-    (status, _, _), (example_status, _, body) = _run(go())
+    with caplog.at_level("WARNING", logger="sequence_ai.serve"):
+        (status, _, _), (example_status, _, body) = _run(go())
     assert status == 200 and example_status == 404 and b"serve(example=...)" in body
+    assert [r.getMessage() for r in caplog.records if r.name == "sequence_ai.serve"] == [serving.NO_EXAMPLE]
+    assert "not warmed up" in serving.NO_EXAMPLE and serving.NO_EXAMPLE.endswith("add a @seq.sample method to the policy")
 
 
 def test_the_lifespan_starts_the_warm_up_and_its_end_stops_the_policys_thread():
@@ -469,14 +477,15 @@ def test_with_a_token_every_request_needs_it():
         try:
             return [await _request(app, "GET", "/ping"),
                     await _request(app, "GET", "/ping", headers=[("Authorization", "Bearer wrong")]),
-                    await _act(app, {"x": 1}),
+                    await _act(app, {"x": 1}),                                      # refused at its observation
+                    await _request(app, "POST", "/act", _act_call("e-alone"), headers=_ACT),
                     await _request(app, "GET", "/ping", headers=[("Authorization", "Bearer s3cret")]),
                     await _act(app, {"x": 1}, headers=[("Authorization", "bearer s3cret")])]
         finally:
             app.close()
 
     answers = _run(go())
-    assert [status for status, _, _ in answers] == [401, 401, 401, 200, 200]
+    assert [status for status, _, _ in answers] == [401, 401, 401, 401, 200, 200]
     assert answers[0][1]["www-authenticate"] == "Bearer" and b"Bearer <token>" in answers[0][2]
 
 
@@ -484,9 +493,11 @@ def test_a_body_over_the_limit_is_refused_before_it_is_read_and_the_connection_c
     async def go():
         app = App(lambda o: 1, limit=1000)
         try:
-            declared = await _request(app, "POST", "/act", b"x" * 2000)
-            streamed = await _request(app, "POST", "/act", chunks=[b"x" * 600, b"x" * 600])
-            return declared, streamed
+            answers = []
+            for path in ("/observe", "/act"):
+                answers.append(await _request(app, "POST", path, b"x" * 2000))                      # declared
+                answers.append(await _request(app, "POST", path, chunks=[b"x" * 600, b"x" * 600]))  # streamed
+            return answers
         finally:
             app.close()
 
@@ -494,37 +505,25 @@ def test_a_body_over_the_limit_is_refused_before_it_is_read_and_the_connection_c
         assert status == 413 and headers["connection"] == "close" and b"limit of 1000 bytes" in body
 
 
-def test_a_picture_that_would_decode_past_the_limit_is_refused_before_it_is_decoded():
-    sent, _ = frames.pack_pictures({"image": _picture()})            # 64 x 48 x 3 = 9,216 bytes once decoded
-    body = msgpack_io.pack(sent)
-
-    async def go():
-        app = App(lambda o: 1, limit=9_000)
-        try:
-            return await _request(app, "POST", "/act", body)
-        finally:
-            app.close()
-
-    status, _, text = _run(go())
-    assert len(body) < 9_000 and status == 400
-    assert b"decodes to 9,216 bytes, past the limit of 9,000" in text, text
-
-
-@pytest.mark.parametrize("body, said", [
-    (b"\xc1", "not an observation this server can read"),
-    (msgpack_io.pack({"__seq__": "jpeg", "v": 1, "data": b"not a jpeg"}), "not a JPEG or PNG"),
-    (msgpack_io.pack({"__seq__": "compressed", "v": 1, "codec": "zstd", "n": 5, "data": b"xx"}), "zstd"),
+@pytest.mark.parametrize("path, body, kind, reason, said", [
+    ("/observe", b"\xc1", msgpack_io.MEDIA_TYPE, "observe", "msgpack type 0xc1 is not supported"),
+    ("/observe", msgpack_io.pack({"state": [1.0]}), msgpack_io.MEDIA_TYPE, "observe", "episode_id"),
+    ("/observe", b"{", "application/json", "observe", "Expecting property name"),
+    ("/act", b"not json", "application/json", "body", "the act does not read"),
 ])
-def test_a_body_that_is_not_an_observation_is_a_400_that_says_why(body, said):
+def test_a_body_that_does_not_read_is_a_400_that_says_why(path, body, kind, reason, said):
     async def go():
         app = App(lambda o: 1)
         try:
-            return await _request(app, "POST", "/act", body)
+            return await _request(app, "POST", path, body, headers=[("Content-Type", kind)])
         finally:
             app.close()
 
-    status, _, text = _run(go())
-    assert status == 400 and said in text.decode()
+    status, headers, text = _run(go())
+    refused = json.loads(text)
+    assert status == 400 and headers["content-type"] == "application/json"
+    assert refused["code"] == "invalid_request" and refused["details"] == {"reason": reason}
+    assert said in refused["detail"], refused["detail"]
 
 
 def test_a_policy_that_raises_is_a_500_with_its_message_and_the_server_goes_on():
@@ -540,8 +539,11 @@ def test_a_policy_that_raises_is_a_500_with_its_message_and_the_server_goes_on()
         finally:
             app.close()
 
-    (status, _, body), (after, _, fine) = _run(go())
-    assert status == 500 and body == b"the policy raised ValueError: no camera named wrist"
+    (status, headers, body), (after, _, fine) = _run(go())
+    refused = json.loads(body)
+    assert status == 500 and headers["content-type"] == "application/json" and refused["code"] == "policy_error"
+    assert refused["detail"] == "the policy raised ValueError: no camera named wrist"
+    assert refused["details"] == {"exception": {"type": "ValueError", "message": "no camera named wrist"}}
     assert after == 200 and msgpack_io.unpack(fine) == "fine"
 
 
@@ -554,21 +556,26 @@ def test_an_output_that_cannot_be_sent_is_a_500_that_says_so():
             app.close()
 
     status, _, body = _run(go())
-    assert status == 500 and b"cannot be sent as msgpack" in body
+    assert status == 500 and b"cannot go back as msgpack" in body
 
 
 def test_other_paths_and_methods():
     async def go():
         app = App(lambda o: 1)
         try:
-            return [await _request(app, "GET", "/act"), await _request(app, "POST", "/ping"),
+            return [await _request(app, "GET", "/act"), await _request(app, "GET", "/observe"),
+                    await _request(app, "GET", "/act/episode_end"), await _request(app, "POST", "/ping"),
                     await _request(app, "GET", "/infer"), await _request(app, "HEAD", "/ping")]
         finally:
             app.close()
 
-    (get_act, h1, _), (post_ping, h2, _), (other, _, body), (head, _, _) = _run(go())
-    assert (get_act, h1["allow"]) == (405, "POST") and (post_ping, h2["allow"]) == (405, "GET, HEAD")
-    assert other == 404 and b"POST /act, GET /ping and GET /example" in body
+    answers = _run(go())
+    assert [(status, headers["allow"], body) for status, headers, body in answers[:4]] == [
+        (405, "POST", b"POST /act"), (405, "POST", b"POST /observe"), (405, "POST", b"POST /act/episode_end"),
+        (405, "GET, HEAD", b"GET /ping")]
+    (other, _, body), (head, _, _) = answers[4:]
+    assert other == 404 and body == (b"this server answers GET /stream, POST /observe, POST /act, "
+                                     b"POST /act/episode_end, GET /ping and GET /example")
     assert head == 200
 
 
@@ -580,7 +587,7 @@ def test_what_is_not_a_policy_function_is_refused_with_what_to_pass():
     async def policy(observation):
         return 1
 
-    with pytest.raises(TypeError, match="an openpi Policy is served as policy.infer"):
+    with pytest.raises(TypeError, match="an object with an infer method is served as policy.infer"):
         App(OpenpiLike())
     with pytest.raises(TypeError, match="async function"):
         App(policy)
@@ -609,33 +616,54 @@ def test_a_robot_reaches_it_over_ipv6():
     except OSError:
         pytest.skip("no IPv6 loopback on this machine")
     app = App(lambda o: {"ok": True})
-    with _serving(app, "::1") as url:
-        with httpx.Client(base_url=url) as client:
-            pinged = client.get("/ping")
-            acted = client.post("/act", content=msgpack_io.pack({}))
-    assert url.startswith("http://[::1]:") and pinged.status_code == 200
-    assert msgpack_io.unpack(acted.content) == {"ok": True}
+    with _serving(app, "::1") as url, httpx.Client(base_url=url) as client:
+        pinged = client.get("/ping")
+        posted = client.post("/observe", content=_observed("e-v6", {}), headers=dict(_OBSERVE))
+        acted = client.post("/act", content=_act_call("e-v6"), headers=dict(_ACT))
+    assert url.startswith("http://[::1]:") and pinged.status_code == 200 and posted.json() == {"through": 0}
+    assert msgpack_io.unpack(acted.content)["outputs"] == {"ok": True}
 
 
-def test_a_port_that_is_taken_is_named():
+def test_a_port_held_but_not_answering_is_named_by_the_bind():
+    """A port held by a socket that is bound but not listening - a probe to it is refused, so nothing "answers" - is
+    still named, by the bind that then fails: the guard behind the answered-at probe."""
     with socket.socket() as taken:
-        taken.bind(("127.0.0.1", 0))
-        taken.listen()
+        taken.bind(("127.0.0.1", 0))                         # bound, not listen()ing
         port = taken.getsockname()[1]
         with pytest.raises(OSError, match=f"port {port} on 127.0.0.1 is taken"):
             serving._listen("127.0.0.1", port)
 
 
-@pytest.mark.parametrize("host", [None, "0.0.0.0"])
-def test_a_port_another_server_answers_on_this_machines_loopback_is_taken_for_every_address(host):
-    """macOS binds 0.0.0.0 beside another program's 127.0.0.1 at the same port; the robots on this machine would reach
-    that program, so serve() refuses the port on every system."""
+@pytest.mark.parametrize("host", [None, "0.0.0.0", "127.0.0.1"])
+def test_a_port_another_server_answers_on_this_machines_loopback_is_taken_for_every_host(host):
+    """A server already answering on this machine's loopback takes the port whether serve() is given no host, a wildcard,
+    or that loopback itself: macOS lets 0.0.0.0 bind beside another program's 127.0.0.1 at the same port (and SO_REUSEADDR
+    lets a second 127.0.0.1 bind over a 0.0.0.0), and the robots on this machine would reach that other program - so
+    serve() probes the loopback and refuses the port rather than split this machine's robots between the two."""
     with socket.socket() as other:
         other.bind(("127.0.0.1", 0))
         other.listen()
         port = other.getsockname()[1]
         with pytest.raises(OSError, match=f"port {port} is taken: a server already answers at 127.0.0.1:{port}"):
             serving._listen(host, port)
+
+
+def test_answered_at_raises_for_a_server_there_and_returns_for_a_free_port():
+    """answered_at is what `seq serve` calls before it says it is serving, so a taken port is one worded line, not a bind
+    traceback after the "serving ..." line: it raises for a server answering on this machine (no host, wildcard, or the
+    loopback itself) and returns for a port nothing listens on."""
+    with socket.socket() as other:
+        other.bind(("127.0.0.1", 0))
+        other.listen()
+        port = other.getsockname()[1]
+        for host in (None, "0.0.0.0", "127.0.0.1"):
+            with pytest.raises(OSError, match=f"port {port} is taken"):
+                serving.answered_at(host, port)
+    with socket.socket() as free:
+        free.bind(("127.0.0.1", 0))
+        free_port = free.getsockname()[1]                    # closed on leaving the block: nothing listens there now
+    serving.answered_at("127.0.0.1", free_port)              # returns, raises nothing
+    serving.answered_at(None, free_port)
 
 
 # ── on a real port ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -657,128 +685,6 @@ def _serving(app: App, host: str = "127.0.0.1"):
         thread.join(10)
 
 
-@pytest.mark.parametrize("jpeg", [True, False])
-def test_a_robots_connect_gets_its_actions_and_sends_pictures_as_the_server_says(jpeg):
-    pytest.importorskip("httpx")
-    from sequence_ai.network.link import connect
-
-    got = []
-
-    def policy(observation):
-        got.append(observation["image"])
-        return {"actions": np.full((8, 7), float(observation["image"].mean()), dtype=np.float32)}
-
-    picture = _picture(3)
-    app = App(policy, jpeg=jpeg, example={"image": picture, "state": np.zeros(7, dtype=np.float32)})
-    with _serving(app) as url:
-        with connect(url, check=False) as link:
-            link.wait_until_ready(10)
-            for _ in range(3):
-                out = link.act({"image": picture, "state": np.zeros(7, dtype=np.float32)})
-            told = dict(link.server or {})
-    assert out["actions"].shape == (8, 7)
-    assert told["server"] == "sequence-ai" and told["pid"] == os.getpid()    # what the robot was told the server is
-    received = got[-1]
-    assert received.shape == picture.shape and received.dtype == np.uint8
-    if jpeg:     # the robot followed the server: sent as JPEG, close to the frame and not equal to it
-        assert not np.array_equal(received, picture) and np.abs(received.astype(int) - picture).mean() < 4
-    else:        # the server does not read JPEG: sent as the array, exactly
-        assert np.array_equal(received, picture)
-    assert app._thread._shutdown                           # the server's end stopped the policy's thread
-
-
-@pytest.mark.parametrize("jpeg", [True, False])
-def test_a_frame_fitted_as_the_docs_fit_it_reaches_the_policy_as_the_picture_it_is(jpeg):
-    """frames.resize_image returns an RGB PIL image; handed to act() as the docs fit a frame, it is sent as the picture it
-    is - as JPEG where the server reads JPEG, as its array where it does not - and the policy reads an HxWx3 uint8 array,
-    where it was refused "Image cannot be sent as msgpack"."""
-    pytest.importorskip("httpx")
-    pytest.importorskip("PIL")
-    from sequence_ai.network import frames
-    from sequence_ai.network.link import connect
-
-    class _Camera:
-        """camera_user of docs/components.md: what reads a frame, here a 64 x 48 one."""
-
-        def read(self):
-            return _picture(5)
-
-    camera_user = _Camera()
-    got = []
-
-    def policy(observation):
-        got.append(observation["image"])
-        return {"actions": np.zeros((8, 7), dtype=np.float32)}
-
-    app = App(policy, jpeg=jpeg, example={"image": np.zeros((224, 224, 3), dtype=np.uint8)})
-    # docs/components.md, as written there
-    frame_user = frames.resize_image(camera_user.read(), 224, 224, mode="pad", filter="bilinear")
-    with _serving(app) as url:
-        with connect(url, check=False) as link:
-            link.wait_until_ready(10)
-            link.act({"image": frame_user})
-    received, exact = got[-1], np.asarray(frame_user)
-    assert received.shape == (224, 224, 3) and received.dtype == np.uint8
-    if jpeg:     # as JPEG: close to the frame, not equal to it
-        assert not np.array_equal(received, exact) and np.abs(received.astype(int) - exact).mean() < 4
-    else:        # as its array, exactly
-        assert np.array_equal(received, exact)
-
-
-def test_a_robot_that_acts_at_once_sends_its_first_picture_as_small_as_the_next_ones():
-    """A robot that acts without wait_until_ready() has heard nothing of what the server reads: its first act asks the
-    ping first, so its pictures already go as JPEG, and the first upload is the size of the ones after it - where a
-    first act of 301,473 bytes, sent as arrays, took 1815 ms and the next ones were about 15 KB."""
-    httpx = pytest.importorskip("httpx")
-    from sequence_ai.network.link import connect
-
-    picture = np.tile(_picture(7), (5, 4, 1))                     # 240 x 256: a camera-sized picture
-    app = App(lambda observation: {"actions": np.zeros((8, 7), dtype=np.float32)}, example={"image": picture})
-    with _serving(app) as url:
-        for _ in range(200):                                       # ready, as another program sees it: the link hears nothing
-            if httpx.get(url + "/ping").status_code == 200:
-                break
-            time.sleep(0.05)
-        with connect(url, check=False) as link:
-            assert link.reads is None
-            sizes = []
-            for _ in range(3):
-                link.act({"image": picture, "state": np.zeros(7, dtype=np.float32)})
-                sizes.append(link.last_body_bytes)
-            pictures = link.stats()["counters"]["pictures"]
-    assert sizes[0] == sizes[1] == sizes[2] and sizes[0] < picture.nbytes / 4, sizes
-    assert pictures == 3                                           # each act's picture went as JPEG, the first's too
-
-
-def test_the_top_level_connect_takes_the_switches_the_docs_give_it():
-    """`sequence_ai.connect(url, jpeg=False)`, as the docs write it, reaches a real serve() with the switch on the
-    connection: the picture goes as its array, exactly; compress= and first_timeout= reach it too. Given with a policy's
-    name, each of them is refused, as token= is."""
-    pytest.importorskip("httpx")
-    import sequence_ai
-    from sequence_ai.errors import InvalidRequest
-
-    got = []
-
-    def policy(observation):
-        got.append(observation["image"])
-        return {"actions": np.zeros((8, 7), dtype=np.float32)}
-
-    picture = _picture(9)
-    app = App(policy, example={"image": picture})                  # serve()'s default: it reads JPEG
-    with _serving(app) as url:
-        with sequence_ai.connect(url, jpeg=False) as link:          # the docs' words
-            link.wait_until_ready(10)
-            link.act({"image": picture})
-            assert not link.sends_jpeg
-        with sequence_ai.connect(url, compress=False, first_timeout=5.0) as link:
-            assert link._compress is False and link._first_timeout == 5.0
-    assert np.array_equal(got[-1], picture)                         # the array, exactly: no JPEG on the way
-    for switch in ({"jpeg": False}, {"compress": False}, {"first_timeout": 5.0}, {"token": "t"}):
-        with pytest.raises(InvalidRequest, match="given by its address|policy server of your own"):
-            sequence_ai.connect("my_policy_user", **switch)
-
-
 def test_the_warm_up_failing_stops_a_real_server():
     app = App(lambda o: 1 / 0, example={"x": 1})
     server = serving._uvicorn(app, "critical")
@@ -788,232 +694,6 @@ def test_the_warm_up_failing_stops_a_real_server():
     thread.start()
     thread.join(20)
     assert not thread.is_alive() and isinstance(app.failure, ZeroDivisionError)
-
-
-# ── an act's copies run it once (REQUEST_HEADER): a robot's copies of one act over each of its uplinks ──────────────────
-def _rid(value: str = "r-0000abcd"):
-    return [("X-Seq-Request-Id", value)]
-
-
-def test_copies_of_one_act_run_the_policy_once_and_each_gets_its_answer():
-    """Two copies of one act - one X-Seq-Request-Id, as network.lines sends one over each uplink - reach the policy once:
-    the copy that comes while the first is running waits for its answer and gets it, marked a copy, and so does one that
-    comes after it, from the answer kept; another id runs the policy again, and a request with no id runs it each time.
-    [fails before: the policy ran for each copy, and no answer was marked a copy]"""
-    calls: list = []
-    release = threading.Event()
-
-    def policy(observation):
-        calls.append(float(observation["state"][0]))
-        release.wait(5)
-        return {"n": len(calls)}
-
-    async def go():
-        app = App(policy)
-        try:
-            first = asyncio.ensure_future(_act(app, {"state": np.ones(1)}, headers=_rid()))
-            await asyncio.sleep(0.05)
-            second = asyncio.ensure_future(_act(app, {"state": np.ones(1)}, headers=_rid()))
-            await asyncio.sleep(0.05)
-            release.set()
-            got = [await first, await second, await _act(app, {"state": np.ones(1)}, headers=_rid())]
-            got.append(await _act(app, {"state": np.ones(1)}, headers=_rid("r-0000abce")))
-            got.append(await _act(app, {"state": np.ones(1)}))
-            got.append(await _act(app, {"state": np.ones(1)}))
-            return got
-        finally:
-            app.close()
-
-    first, second, late, other, plain, again = _run(go())
-    assert [msgpack_io.unpack(r[2])["n"] for r in (first, second, late)] == [1, 1, 1]
-    assert [r[1].get("x-seq-request-copy") for r in (first, second, late)] == [None, "1", "1"]
-    assert all(r[0] == 200 and re.fullmatch(r"act;dur=\d+\.\d, model;dur=\d+\.\d", r[1]["server-timing"])
-               for r in (first, second, late))
-    assert [msgpack_io.unpack(r[2])["n"] for r in (other, plain, again)] == [2, 3, 4]
-    assert len(calls) == 4 and "once" in first[1]["x-seq-reads"].split(", ")
-
-
-def test_a_copy_of_an_act_the_policy_raised_on_gets_the_same_500_and_the_policy_is_not_run_again():
-    calls: list = []
-
-    def policy(observation):
-        calls.append(1)
-        raise RuntimeError("no gripper")
-
-    async def go():
-        app = App(policy)
-        try:
-            return [await _act(app, {"state": np.ones(1)}, headers=_rid()) for _ in range(2)]
-        finally:
-            app.close()
-
-    first, copy = _run(go())
-    assert first[0] == copy[0] == 500 and first[2] == copy[2] and b"no gripper" in copy[2]
-    assert copy[1].get("x-seq-request-copy") == "1" and len(calls) == 1
-
-
-def test_an_answer_is_kept_for_its_copies_only_so_long(monkeypatch):
-    """Past ONCE_KEEP_S an act's answer is let go: a copy that comes later runs the policy again."""
-    calls: list = []
-    monkeypatch.setattr(serving, "ONCE_KEEP_S", 0.0)
-
-    async def go():
-        app = App(lambda o: calls.append(1) or {"n": len(calls)})
-        try:
-            first = await _act(app, {"state": np.ones(1)}, headers=_rid())
-            await asyncio.sleep(0.01)
-            return first, await _act(app, {"state": np.ones(1)}, headers=_rid())
-        finally:
-            app.close()
-
-    first, later = _run(go())
-    assert [msgpack_io.unpack(r[2])["n"] for r in (first, later)] == [1, 2]
-    assert later[1].get("x-seq-request-copy") is None
-
-
-# ── an act's halves (HALF_HEADER): a robot's act in two halves, each on a connection of its own ───────────────────────
-def _half(n: int, rid: str = "r-0000abcd"):
-    return [("X-Seq-Request-Id", rid), ("X-Seq-Half", f"{n}/2")]
-
-
-@pytest.mark.parametrize("second_first", [False, True], ids=["first-half-first", "second-half-first"])
-def test_an_acts_two_halves_are_joined_in_either_order_and_run_once(second_first):
-    """The body's two halves reach the policy as the observation they make together, once, in whichever order they
-    come: the first half gets the answer, with the server's time from when the act was whole, and the second 202."""
-    calls: list = []
-
-    def policy(observation):
-        calls.append(observation)
-        return {"sum": int(observation["noise"].astype(np.int64).sum())}
-
-    noise = np.random.default_rng(1).integers(0, 256, 5000, dtype=np.uint8)
-    body = msgpack_io.pack({"noise": noise})
-    cut = len(body) // 2
-
-    async def go():
-        app = App(policy)
-        try:
-            def first():
-                return _request(app, "POST", "/act", body[:cut], headers=_half(1))
-
-            def second():
-                return _request(app, "POST", "/act", body[cut:], headers=_half(2))
-
-            if second_first:
-                got_second = await second()
-                return await first(), got_second
-            waiting = asyncio.ensure_future(first())
-            await asyncio.sleep(0.05)
-            assert not waiting.done()                       # the first half waits for the second
-            got_second = await second()
-            return await waiting, got_second
-        finally:
-            app.close()
-
-    first, second = _run(go())
-    assert first[0] == 200 and msgpack_io.unpack(first[2])["sum"] == int(noise.astype(np.int64).sum())
-    assert second[0] == 202 and second[2] == b""
-    assert len(calls) == 1 and np.array_equal(calls[0]["noise"], noise)
-    assert "split" in first[1]["x-seq-reads"].split(", ") and first[1].get("x-seq-request-copy") is None
-    assert re.fullmatch(r"act;dur=\d+\.\d, model;dur=\d+\.\d", first[1]["server-timing"])
-
-
-def test_a_first_half_whose_second_does_not_come_is_answered_424_and_the_act_runs_once_sent_whole(monkeypatch):
-    """Past HALF_WAIT_S the first half is answered 424 and nothing runs: the robot sends the act whole, and that runs it
-    once; a second half that comes after the wait finds nothing to join."""
-    monkeypatch.setattr(serving, "HALF_WAIT_S", 0.1)
-    calls: list = []
-    body = msgpack_io.pack({"state": np.ones(3)})
-
-    async def go():
-        app = App(lambda o: calls.append(1) or {"n": len(calls)})
-        try:
-            first = await _request(app, "POST", "/act", body[:5], headers=_half(1))
-            late = await _request(app, "POST", "/act", body[5:], headers=_half(2))
-            ran = len(calls)
-            return first, late, ran, await _request(app, "POST", "/act", body, headers=_rid())
-        finally:
-            app.close()
-
-    first, late, ran, whole = _run(go())
-    assert first[0] == 424 and b"send the act whole" in first[2] and late[0] == 202 and ran == 0
-    assert whole[0] == 200 and msgpack_io.unpack(whole[2])["n"] == 1 and len(calls) == 1
-
-
-def test_a_half_of_an_act_that_ran_whole_gets_its_answer_and_a_whole_copy_answers_a_first_half_waiting():
-    """network.lines may send one act whole over one uplink and in halves over another: whichever is whole first runs
-    it, once, and every half of it gets what it got, the first halves marked a copy."""
-    calls: list = []
-    body = msgpack_io.pack({"state": np.ones(3)})
-
-    async def go():
-        app = App(lambda o: calls.append(1) or {"n": len(calls)})
-        try:
-            whole = await _request(app, "POST", "/act", body, headers=_rid())
-            first = await _request(app, "POST", "/act", body[:5], headers=_half(1))
-            second = await _request(app, "POST", "/act", body[5:], headers=_half(2))
-            waiting = asyncio.ensure_future(_request(app, "POST", "/act", body[:5], headers=_half(1, "r-0000abce")))
-            await asyncio.sleep(0.05)
-            other = await _request(app, "POST", "/act", body, headers=_rid("r-0000abce"))
-            return whole, first, second, await waiting, other
-        finally:
-            app.close()
-
-    whole, first, second, woken, other = _run(go())
-    assert [msgpack_io.unpack(r[2])["n"] for r in (whole, first, woken, other)] == [1, 1, 2, 2] and len(calls) == 2
-    assert [r[1].get("x-seq-request-copy") for r in (whole, first, woken, other)] == [None, "1", "1", None]
-    assert second[0] == 202
-
-
-@pytest.mark.parametrize("headers", [[("X-Seq-Half", "1/2")], [("X-Seq-Request-Id", "r-0000abcd"), ("X-Seq-Half", "3/2")]],
-                         ids=["no-request-id", "not-a-half"])
-def test_a_half_with_no_act_or_no_half_named_is_a_400_that_says_so(headers):
-    async def go():
-        app = App(lambda o: {"n": 1})
-        try:
-            return await _request(app, "POST", "/act", b"\x80", headers=headers)
-        finally:
-            app.close()
-
-    status, _, said = _run(go())
-    assert status == 400 and b"X-Seq-Half is 1/2 or 2/2" in said
-
-
-def test_halves_that_together_are_over_the_limit_are_a_413():
-    async def go():
-        app = App(lambda o: {"n": 1}, limit=100)
-        try:
-            waiting = asyncio.ensure_future(_request(app, "POST", "/act", b"\x00" * 60, headers=_half(1)))
-            await asyncio.sleep(0.01)
-            await _request(app, "POST", "/act", b"\x00" * 60, headers=_half(2))
-            return await waiting
-        finally:
-            app.close()
-
-    status, _, said = _run(go())
-    assert status == 413 and b"halves are over this server's limit of 100 bytes" in said
-
-
-def test_halves_kept_are_let_go_past_their_wait_and_past_how_many_acts_may_wait(monkeypatch):
-    """Only the halves of the HALF_KEEP_N latest acts are kept, each HALF_WAIT_S at most: a robot that sends second halves
-    alone holds no more than that."""
-    monkeypatch.setattr(serving, "HALF_KEEP_N", 3)
-
-    async def go():
-        app = App(lambda o: {"n": 1})
-        try:
-            for i in range(5):
-                await _request(app, "POST", "/act", b"\x00", headers=_half(2, f"r-0000000{i}"))
-            kept = list(app._halves)
-            monkeypatch.setattr(serving, "HALF_WAIT_S", 0.0)
-            await asyncio.sleep(0.01)
-            await _request(app, "POST", "/act", b"\x00", headers=_half(2, "r-00000009"))
-            return kept, list(app._halves)
-        finally:
-            app.close()
-
-    kept, after = _run(go())
-    assert kept == [b"r-00000002", b"r-00000003", b"r-00000004"] and after == [b"r-00000009"]
 
 
 @pytest.fixture
@@ -1056,3 +736,66 @@ def test_a_program_that_shows_info_on_its_root_logger_keeps_the_lines_there(serv
     serve_module._log_with("info")
     assert serve_module.log.handlers == [] and serve_module.log.propagate is True
 
+
+
+def test_the_warm_up_tries_the_speed_ups_on_the_policys_thread_on_the_examples_as_robots_send_them(monkeypatch):
+    """engine.optimize runs before the warm-up, on the policy's own thread, with the batch sizes and switches serve()
+    was given, on each example as a robot's observation reaches the policy; /ping then names what it kept."""
+    import sys
+
+    from sequence_ai.engine.optimize import Optimized
+
+    picture, asked = _picture(), []
+
+    def stand_in(policy, examples, *, batch=None, say=print, **switches):
+        image = examples[0]["image"]
+        asked.append((threading.current_thread().name, len(examples), image.flags.writeable,
+                      bool(np.abs(image.astype(int) - picture).mean() < 4), batch, switches))
+        return Optimized(policy, {"on": ["cuda_graphs"]})
+
+    monkeypatch.setattr(sys.modules["sequence_ai.engine.optimize"], "optimize", stand_in)
+    examples = [{"image": picture, "state": np.zeros(7, dtype=np.float32)} for _ in range(3)]
+
+    async def go():
+        app = App(lambda observations: [{"actions": np.zeros(3)} for _ in observations], batch=[1, 2],
+                  examples=examples, whole_graph=False)
+        try:
+            await _request(app, "GET", "/ping")
+            for _ in range(200):
+                if app.ready:
+                    break
+                await asyncio.sleep(0.01)
+            return await _request(app, "GET", "/ping"), await _request(app, "GET", "/example")
+        finally:
+            app.close()
+
+    (status, _, body), (example_status, _, example_body) = _run(go())
+    assert status == 200 and json.loads(body)["optimized"] == ["cuda_graphs"]
+    assert asked == [("sequence_ai-policy_0", 3, True, True, [1, 2],
+                      {"cuda_graphs": None, "whole_graph": False, "torch_compile": False, "fused_kernels": False,
+                       "tensorrt": False, "precision": None, "tolerance": None})]
+    assert example_status == 200 and np.array_equal(msgpack_io.unpack(example_body)["image"], picture)
+
+
+def test_a_server_with_no_speed_up_on_says_so_in_its_ping():
+    async def go():
+        app = App(lambda o: {"actions": np.zeros(2)}, example={"x": np.zeros(2)})
+        try:
+            await _request(app, "GET", "/ping")
+            for _ in range(200):
+                if app.ready:
+                    break
+                await asyncio.sleep(0.01)
+            return await _request(app, "GET", "/ping")
+        finally:
+            app.close()
+
+    status, _, body = _run(go())
+    assert status == 200 and json.loads(body)["optimized"] == []       # no torch module: nothing to turn on
+
+
+def test_a_speed_up_that_changes_the_outputs_without_a_tolerance_is_refused_before_the_server_starts():
+    with pytest.raises(ValueError, match="torch_compile changes the policy's outputs: give tolerance="):
+        App(lambda o: o, example={"x": np.zeros(2)}, torch_compile=True)
+    with pytest.raises(ValueError, match="precision='fp16' changes the policy's outputs"):
+        serving.serve(lambda o: o, port=0, precision="fp16")

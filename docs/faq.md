@@ -16,7 +16,7 @@ Network layer (`sequence_ai.network`):
 
 Inference layer (`sequence_ai.engine`):
 
-- [`cuda_graphs`](#cuda_graphs)
+- [`optimize`](#optimize)
 - [`batcher`](#batcher)
 - [`replicas`](#replicas)
 - [`slack`](#slack)
@@ -24,15 +24,6 @@ Inference layer (`sequence_ai.engine`):
 [General](#general)
 
 ## Installing
-
-### `ImportError: connect() uses httpx for its connection, and httpx is not installed`
-
-httpx is a dependency of `sequence-ai`, so `pip install sequence-ai` installs it. The error appears where `link.py` was
-copied into a project that has no httpx: install it there, as the error message states.
-
-```text
-ImportError: connect() uses httpx for its connection, and httpx is not installed: pip install httpx
-```
 
 ### `ModuleNotFoundError: No module named 'numpy'` or `'uvicorn'`
 
@@ -69,134 +60,76 @@ The first line is what `frames.resize_image` raises, the second what `frames.enc
 
 | You use | Install |
 |---|---|
-| `connect()` on the robot, the quick start's server, `frames`, `window`, `ping`, `tcp_link`, `one_write` under uvicorn, `wifi_power`, `msgpack_io`, `latency_stats`, `lerobot`, every inference component, numpy arrays in observations or responses, `compress=True` | `sequence-ai`, nothing more |
+| `connect()` on the robot, `frames`, `window`, `ping`, `tcp_link`, `one_write` under uvicorn, `wifi_power`, `msgpack_io`, `latency_stats`, `lerobot`, every inference component, numpy arrays in observations or responses | `sequence-ai`, nothing more |
+| `seq serve`, and the quick start's server | `sequence-ai`, on Python 3.10 or later |
+| `sequence_ai.Video`, `Depth` and `Tactile`, and pictures sent as video keyframes, `connect()`'s default | `sequence-ai`, on Python 3.10 or later; on 3.9, pictures go as they are |
 | `bench/`, the measuring tool | a checkout of the repository; it is standard library only |
 
-Python 3.9 or later.
+Python 3.9 or later on the robot; 3.10 or later for `seq serve` and for video.
 
 ## Connecting
 
-### `httpx.ConnectError: [Errno 61] Connection refused`
+### `Unavailable: ... had no answer from http://...:8000 (nothing listens there, or this machine's network does not reach it)`
 
-Nothing is listening at that address and port. Check, in this order:
+`wait_until_ready()` reached nothing at that address before its bound. Check, in this order:
 
 1. The server is running, and its log shows the port you gave `connect()`.
 2. The server listens on an address the robot can reach. `127.0.0.1` is reachable from the same machine only.
-   `serve()` listens on every address unless it is given `host`; a server of your own, on a GPU elsewhere, starts on
-   `0.0.0.0`.
-3. The URL starts with `http://` and has the port: `connect("http://YOUR_GPU:8000")`.
+   `seq serve` listens on every address unless it is given `--host`.
+3. The URL starts with `http://`, has the port, and its host name resolves: `connect("http://YOUR_GPU:8000")`. A
+   misspelled name gives the same line.
+4. The GPU's firewall lets the robot's address in on that port: a closed one drops the robot's packets, and nothing
+   answers.
 
 ```text
-httpx.ConnectError: [Errno 61] Connection refused: no response from http://127.0.0.1:8000. Is the policy server running there, listening on an address this machine can reach (0.0.0.0, not 127.0.0.1, for another machine), on that port?
+sequence_ai.errors.Unavailable: 127.0.0.1-8000 had no answer from http://127.0.0.1:8000 (nothing listens there, or this machine's network does not reach it) after 3s (wait_until_ready timeout_s)
 ```
 
-The text up to the first colon after `ConnectError:` comes from the operating system, so Linux prints a different
-number. The rest comes from `connect()`, with the address it was given.
-
-### `httpx.ConnectTimeout: timed out`
-
-The address did not respond at all. That is the symptom of a closed firewall: the GPU's network drops the robot's
-packets instead of refusing them. Open the server's port to the robot's address in the GPU's firewall, then try again.
+Without `wait_until_ready()`, the first act meets the same thing as it opens the robot's stream:
 
 ```text
-httpx.ConnectTimeout: timed out
-```
-
-It is raised after `timeout` seconds, 10 unless you pass another: `connect(url, timeout=2)`.
-
-### `httpx.ConnectError: [Errno 8] nodename nor servname provided, or not known`
-
-The host name in the URL does not resolve. Check the spelling, or use the GPU's IP address.
-
-```text
-httpx.ConnectError: [Errno 8] nodename nor servname provided, or not known
-```
-
-### `httpx.ReadTimeout: no response from ... The server may still be running this act`
-
-The server took longer than the robot waits: up to 120 s for the first act (`first_timeout`), 10 s for the others
-(`timeout`). A model's first inference is often its slowest, because it compiles then. Start the server with
-`serve(policy, example=observation)`, which runs the policy before it says it is ready, and call
-`link.wait_until_ready()` on the robot before it moves. If every call is slow, the time is in the model and not in the
-link: `python -m sequence_ai.check` says how long the server says its model took.
-
-With `timeout=1.0, first_timeout=1.0` against a model that took 3 s (sequence-ai 0.63.0):
-
-```text
-httpx.ReadTimeout: no response from http://127.0.0.1:8013 in 1 s. The server may still be running this act - a model's first inference compiles it, often for tens of seconds - and the next act waits for it first, as long as a first act waits. Wait for the server once, before the robot moves, with wait_until_ready(example=observation), or give connect() a longer first_timeout= (now 1 s) or timeout= (now 1 s)
+sequence_ai.errors.Unavailable: worker unreachable after 5 reconnect attempts: the stream to the worker did not open: the worker could not be reached (1 try in 0.0 s, the last in its TCP connect)
 ```
 
 ## Sending and reading
 
-### `httpx.HTTPStatusError: Client error '404 Not Found'`
-
-The server has no POST at that path. `connect()` posts to `/act` unless told otherwise:
-`connect(url, act_path="/infer")`, or `link.act(observation, path="/infer")` for one call.
-
-```text
-httpx.HTTPStatusError: Client error '404 Not Found' for url 'http://127.0.0.1:8012/infer'
-```
-
-### `httpx.HTTPStatusError: Client error '401 Unauthorized'`
+### `AuthError: the server at ... refused this robot's ping (401)`
 
 The server was started with a token, and the robot sent none or another. Connect with the server's token:
-`sequence_ai.connect(url, token="...")`, the one given to `serve(policy, token=...)` or set as `SEQ_SERVE_TOKEN` on the
-GPU. `wait_until_ready()` says the same of `/ping`. Reproduced with sequence-ai 0.63.0:
+`sequence_ai.connect(url, token="...")`, the one `seq serve` was given with `--token` or as `SEQ_SERVE_TOKEN` on the
+GPU. `wait_until_ready()` raises it at once: asking again changes nothing.
 
 ```text
-httpx.HTTPStatusError: Client error '401 Unauthorized' for url 'http://127.0.0.1:8011/act'
+sequence_ai.errors.AuthError: the server at http://127.0.0.1:8000 refused this robot's ping (401) (hint: it asks for its token: connect(url, token=...))
 ```
 
-### `httpx.HTTPStatusError: Server error '500 Internal Server Error'` after adding `compress=True`
+### `PolicyError: the policy raised ...`
 
-A server of your own does not decompress the arrays. (`serve()` does, and says so, and `connect()` compresses
-nothing for a server that does not say it decompresses; `compress=True` compresses whatever the server says.) Either
-decompress where the server reads the body, or leave `compress=True` off:
-
-```python
-from sequence_ai.network import compressed, msgpack_io
-
-observation_user, _ = compressed.expand(msgpack_io.unpack(body_user), limit=64 << 20)
-```
-
-The robot sees this:
+The policy raised on the observation the act was answered from. The server's log has the traceback, and the server
+goes on answering the next acts.
 
 ```text
-httpx.HTTPStatusError: Server error '500 Internal Server Error' for url 'http://127.0.0.1:8012/act'
+sequence_ai.errors.PolicyError: the policy raised KeyError: 'camera'
 ```
 
-and the server's log shows the model receiving a map where it expected an array:
+### `PolicyError: the policy's answer cannot go back as msgpack: ...`
+
+The policy returned something msgpack cannot carry. Return JSON-like values, bytes and numpy arrays; torch tensors and
+JAX arrays are turned into numpy arrays for you.
 
 ```text
-AttributeError: 'dict' object has no attribute 'mean'
+sequence_ai.errors.PolicyError: the policy's answer cannot go back as msgpack: object cannot be sent as msgpack (JSON values, bytes and numpy arrays can)
 ```
 
-### `MsgpackError: ... cannot be sent as msgpack`
+### `InvalidRequest: observe(): this observation cannot be sent - ...`
 
-The observation contains a type msgpack cannot encode. Send JSON-like values, bytes and numpy arrays; convert a set
-to a list, and an object to a dict of its fields.
-
-```text
-MsgpackError: set cannot be sent as msgpack (JSON values, bytes and numpy arrays can)
-```
-
-### `MsgpackError: a numpy array of dtype object is not carried`
-
-Give the array a numeric, bool or string dtype. An array of Python objects is refused on purpose: reading one back
-would run code the sender chose.
+The observation contains something msgpack cannot carry, and nothing was sent. Send JSON-like values, bytes and numpy
+arrays: convert a set to a list, and an object to a dict of its fields. An array of Python objects (dtype object) is
+refused on purpose: reading one back would run code the sender chose.
 
 ```text
-MsgpackError: a numpy array of dtype object is not carried: only plain numeric, bool and string dtypes are
-```
-
-### `MsgpackError: msgpack type 0xc1 is not read here`
-
-The body is not msgpack that this reader takes: it is another format, it was cut short, or it uses a msgpack
-extension type. Check the response's `content-type`. `connect()` reads `application/json` responses as JSON and
-everything else as msgpack.
-
-```text
-MsgpackError: msgpack type 0xc1 is not read here (extension types and the unused code)
+sequence_ai.errors.InvalidRequest: observe(): this observation cannot be sent - set cannot be sent as msgpack (JSON values, bytes and numpy arrays can)
+sequence_ai.errors.InvalidRequest: observe(): this observation cannot be sent - a numpy array of dtype object is not carried: only plain numeric, bool and string dtypes are
 ```
 
 ## With openpi and LeRobot
@@ -255,15 +188,15 @@ tested with LeRobot's own client and server. See
 
 ### `OSError: [Errno 48] port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine`
 
-Another program has the port, often an earlier `serve()` still running: `lsof -nP -iTCP:8000 -sTCP:LISTEN` names it.
+Another program has the port, often an earlier `seq serve` still running: `lsof -nP -iTCP:8000 -sTCP:LISTEN` names it.
 Stop it, or give the server and the robot another port:
 
 ```bash
-python quickstart_server.py 127.0.0.1 8001
+seq serve --port 8001                                    # in the policy's folder
 python quickstart_robot.py http://127.0.0.1:8001
 ```
 
-`serve()` (sequence-ai 0.63.0) prints:
+`seq serve` (sequence-ai 0.64.1) prints, last:
 
 ```text
 OSError: [Errno 48] port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine (an earlier serve() still running?); stop it, or pass another port
@@ -277,9 +210,9 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 800
 
 ### `ERROR: the policy failed on the example (KeyError: 'camera'): stopping`
 
-`serve()` ran the policy on `example` before saying it is ready, and the policy raised: the server stops, and the
-traceback it raises is the policy's own. Give `example` the keys and shapes your robot sends, or fix the policy. With a
-policy that reads a key the example does not have (sequence-ai 0.63.0):
+`seq serve` ran the policy on its sample's first observation before saying it is ready, and the policy raised: the
+server stops, and the traceback it raises is the policy's own. Give `@seq.sample` the keys and shapes your robot sends,
+or fix the policy. With a policy that reads a key its sample does not have (sequence-ai 0.64.1):
 
 ```text
 ERROR:    the policy failed on the example (KeyError: 'camera'): stopping
@@ -287,21 +220,6 @@ INFO:     Shutting down
 ...
 KeyError: 'camera'
 ```
-
-### My server's log fills with `GET /ping`
-
-That is the robot keeping its connection warm: one small request for each 100 ms the connection is idle, for a
-minute after the last request. `serve()` writes no line per request; a uvicorn server of your own wrote three in 0.35
-seconds:
-
-```text
-INFO:     127.0.0.1:52970 - "GET /ping HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52970 - "GET /ping HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52970 - "GET /ping HTTP/1.1" 200 OK
-```
-
-To keep the pings and lose the lines, start uvicorn with `access_log=False`. To stop the pings, pass
-`connect(url, ping_path=None)`; `ping_every_s` and `ping_for_s` change how often and for how long.
 
 ### Can the server ping instead, so the robot's code does not change?
 
@@ -357,65 +275,61 @@ What a network component saves depends on the link:
 The README has the [results](../README.md#results).
 [Measure your own link](how-do-i-measure-the-link-between-my-robot-and-my-gpu.md) before and after.
 
-## `cuda_graphs`
+## `optimize`
 
-Lines that begin `cuda graphs:` are printed, not raised: the model keeps running, in eager mode where it was not
-graphed.
+`seq serve` tries the speed-ups during the warm-up and prints one line for each switch it tries. A switch that stays
+off says why; the model keeps running as it was.
 
-### `cuda graphs: no CUDA GPU available: nothing captured`
+### `optimize: nothing turned on - this machine has no CUDA GPU`
 
-This machine has no CUDA GPU that torch can use, so the model is unchanged. That is the expected line on a laptop.
-On a machine that has a GPU, check `torch.cuda.is_available()`: a CPU-only build of torch prints the same line.
+The switches that keep the outputs exactly the same need a CUDA GPU that torch, or JAX, can use. That is the expected
+line on a laptop. On a machine that has a GPU, check `torch.cuda.is_available()`: a CPU-only build of torch prints the
+same line.
 
-### `cuda graphs: action_head.denoiser is not in this model: not captured`
+### `optimize: nothing turned on - no observation to check the outputs on: give examples=, or the policy a @seq.sample method`
 
-The path names no attribute of your model. Paths are dotted attribute names from the model you passed, as
-`cuda_graphs.modules_of(model)` lists them. Use the census to get the path instead of writing it by hand:
+The checks run the policy on the observations of its `@seq.sample` episode. Give it one, preferably of 32 or more of
+your robot's own observations.
 
-```python
-from sequence_ai.engine import cuda_graphs
+### `optimize: cuda_graphs off - no module is called more than once a run with the same shapes`
 
-census_user = cuda_graphs.Census(cuda_graphs.modules_of(model_user))
-for _ in range(3):
-    model_user(observation_user)
-    census_user.end_act()
-census_user.close()
-print(census_user.candidates())        # [{'path': 'denoiser', 'calls': 10, 'ms': 1.05}]
-```
+A module called once per run has no launches to save across calls, so no module was graphed. `whole_graph` can still
+cover the run's whole call; its line says whether it did.
 
-The line is printed on a machine with no GPU too, so a mistyped path shows up on a laptop.
+### `optimize: cuda_graphs off - its outputs differed from eager mode's on run ...`
 
-### `cuda graphs: ... is not a torch module: not captured`
+A graph replayed an output that is not eager mode's byte for byte, so it was taken out and the model runs as it did.
+The check is working as intended.
 
-The path names something that is not a `torch.nn.Module`: a function, a tensor, a list. Name the module that contains
-it.
+### `optimize: whole_graph off - the policy raised with it on: ...`
 
-### `cuda graphs: ... runs in eager mode for one of its shapes: ...`
+The policy's own code refused its call once it was replayed from a graph, with its own error after the colon: code
+that reads a value back from the GPU in the middle of a run cannot be captured whole. The modules `cuda_graphs` graphs
+are unaffected.
 
-One shape of that module's inputs could not be graphed, and runs in eager mode from now on. The other shapes are
-unaffected. The text after the colon gives the reason:
+### `optimize: cuda_graphs off - 1% faster (act ... ms), under the 10% it needs`
 
-- `its capture failed (...)`: the module does something a CUDA graph cannot record, with torch's own error in
-  parentheses. Naming a smaller module inside it often works.
-- `its output is of a type a graph cannot return`: the module returns something other than tensors and plain
-  values.
-- `its graph's output differed from eager mode's`: the replay did not equal eager mode byte for byte, so it is not used.
-  The check is working as intended, and that shape stays in eager mode.
-- `cuda graphs need torch 2.4 or later`: older torch cannot swap the GPU's random generator while a capture runs,
-  and a failed capture would corrupt your model's random noise. Nothing is captured. Upgrade torch.
+A switch stays on only when acts are at least 10% faster with it, so it was taken out and the model runs as it did. A
+switch that changes the outputs is timed as it will run, with `cuda_graphs` on in both turns, and the times on its
+line say `with cuda_graphs on in both`.
 
-### I installed it and nothing got faster
+### `ValueError: torch_compile changes the policy's outputs: give tolerance=...`
+
+`torch_compile`, `fused_kernels`, `tensorrt` and `precision` change the outputs, so each runs only with the difference
+you accept: `seq serve --tolerance 1e-3`, or `--tolerance max_abs=0.02,cosine=0.999`.
+
+### Every switch stayed off: no faster
 
 In order of likelihood:
 
-1. **The module is called once per run.** The gain comes from the kernel launches across many calls. Run the census:
-   `calls` is the number of calls per run.
-2. **The model was not launch-bound.** A model whose GPU is already busy nearly all the time has no launch overhead
+1. **The model was not launch-bound.** A model whose GPU is already busy nearly all the time has no launch overhead
    to remove: π0.5 under JAX was 98% GPU-busy.
-3. **Every call has a new shape.** Each new shape is captured once; a run of new shapes is a run of captures.
-4. **It is running in eager mode.** Look for a `runs in eager mode` line above.
+2. **Every call has a new shape.** Each new shape is captured once; a run of new shapes is a run of captures.
+3. **The sample episode was not the robot's.** Make the `@seq.sample` episode's observations as your robot sends them,
+   so the shapes checked are the shapes served.
 
-[How do I make a PyTorch robot policy faster without changing its outputs?](how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
+[How do I make a policy faster without changing its outputs, and what does each switch
+change?](how-do-i-make-a-policy-faster-without-changing-its-outputs.md)
 
 ## `batcher`
 
@@ -476,10 +390,10 @@ a new pool.
 
 `devices` has one entry for each replica: `ReplicaPool(load, replicas=2, devices=[0, 1])`.
 
-### Two replicas on one GPU are no faster
+### One replica per GPU
 
-That is what was measured:
-[Should I run two replicas of a policy on one GPU?](should-i-run-two-replicas-of-a-policy-on-one-gpu.md)
+One replica uses the whole card. To serve more robots from it, batch their requests (`@seq.concurrent`) rather than
+start a second replica.
 
 ## `slack`
 
@@ -493,6 +407,13 @@ error. List only the sizes that run.
 
 The policy leaves no slack: its robot requests the next chunk only when the current one is fully executed, so there
 is no time in which to wait for a batch. See "Rules and requirements" in [`docs/slack.md`](slack.md#rules-and-requirements).
+
+### `503 ... this server cannot answer this robot within the 350 ms left of each answer`
+
+The server was started with `hz` and seats only the robots it answers in time, each by its own round trip. The message
+names what this robot's acts spend outside the server and what a batch takes there. Serve the robot from a GPU nearer
+it, or act again once another robot has stopped: a robot gives its place up a few seconds after its last act. `GET
+/ping` shows the robots seated, the seats, and each batch size's time.
 
 ## General
 

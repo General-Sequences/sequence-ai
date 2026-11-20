@@ -3,6 +3,26 @@
 What changed in each release of SequenceLink's package, `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
+## 0.65.0 — 2026-11-20
+
+`sequence-ai` is the open-source framework (a `@seq.policy` class served by `seq serve`, and `connect()` on the
+robot), and `seq deploy`, evals and the platform's other commands move to a separate package, `sequence-cloud`.
+
+Needs `pip install sequence-cloud --extra-index-url "https://$SEQUENCES_API_KEY@api.generalsequences.com/simple"` for
+`seq deploy`, evals and the platform's other commands.
+
+### Added
+
+- `seq serve` keeps each speed-up that leaves the outputs exactly the same and makes acts at least 10% faster, and runs
+  `--torch-compile`, `--fused-kernels`, `--tensorrt` and `--precision` only with the `--tolerance` you give.
+- `sequence_ai.engine.load` packs a checkpoint (safetensors, .pth or orbax) into one file that loads onto the GPU in
+  parallel reads.
+
+### Changed
+
+- `connect()` to your own server streams each observation with `observe()` as it is made, `act()` carries none, and a
+  camera picture goes as a video keyframe unless `pictures="exact"`.
+
 ## 0.64.1 — 2026-11-19
 
 A benchmark that types a setting no eval can set is refused when you deploy it, and a `--param` value reaches a text

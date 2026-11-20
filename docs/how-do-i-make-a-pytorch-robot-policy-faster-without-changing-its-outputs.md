@@ -1,20 +1,20 @@
 # How do I make a PyTorch robot policy faster without changing its outputs?
 
 Replay the module your policy calls many times per run, its denoiser, from CUDA graphs captured from its own eager
-kernels. `cuda_graphs.install` does that in one call, and keeps a graph only when its output equals eager mode's byte
-for byte. On GR00T N1.7 on an L4 this reduced a run from 224 ms to 146 ms (1.54 times faster) with exactly the same
-actions. It gains nothing on a model that already fuses and graphs its kernels.
+kernels. `seq serve` does that by default while it warms the policy up: it finds the modules, captures them, and keeps
+the graphs only when the outputs on its `@seq.sample` episode equal eager mode's byte for byte and acts are at least
+10% faster. On GR00T N1.7 on an L4, graphing its diffusion transformer reduced a run from 224 ms to 146 ms
+(1.54 times faster) with exactly the same actions. It gains nothing on a model that already fuses and graphs its
+kernels.
 
-```python
-from sequence_ai.engine import cuda_graphs
-
-cuda_graphs.install(model_user, ["action_head.denoiser"])    # model.action_head.denoiser, graphed in place
-model_user(observation_user)                                       # a new shape: run in eager mode, captured, checked
-model_user(observation_user)                                       # replayed
+```bash
+seq serve my_policy_user     # its warm-up prints a line for each switch: on or off, the modules, why
 ```
 
-Nothing else in your code changes. The module stays where it is in your model, the same object of the same class,
-with its weights, its `state_dict` and its hooks unchanged. Only its `forward` is replaced.
+Nothing else in your code changes. Each graphed module stays where it is in your model, the same object of the same
+class, with its weights, its `state_dict` and its hooks unchanged. Only its `forward` is replaced.
+[How do I make a policy faster without changing its outputs, and what does each switch change?](how-do-i-make-a-policy-faster-without-changing-its-outputs.md)
+has every switch and what its line says.
 
 ## Why this is faster
 
@@ -35,56 +35,38 @@ model and GPU:
 | `torch.compile`, inductor | 1.45× | changed: 0.0051 apart on average |
 | `cuda_graphs` | 1.54× (224 ms to 146 ms) | exactly the same, on inputs it was not captured on |
 
-GR00T N1.7, one L4, its DiT captured. One model and one GPU: **these are not numbers for your model.**
+GR00T N1.7 on one L4, its DiT captured.
 
-`cuda_graphs` verifies the equality instead of assuming it. Each new shape is run in eager mode once, captured, and
-replayed on the same inputs; the graph is kept only if the two outputs are equal byte for byte. A shape whose capture
-fails or differs runs in eager mode from then on, which is reported once.
+`seq serve` verifies the equality instead of assuming it. It runs the `@seq.sample` episode's observations with fixed
+random states, in eager mode and then with the graphs, and keeps them only if every output is equal byte for byte. After
+that, each new shape is run in eager mode once, captured, and replayed on the same inputs; its graph is kept only if the
+two outputs are equal. A shape whose capture fails or differs runs in eager mode from then on, which is reported once.
 
-## Which module to name
+## Which modules it graphs
 
-One that is called more than once per run with the same shapes. To find it, count the calls over a few runs:
+Each module called more than once per run with the same shapes. `seq serve` counts the calls each module gets while
+the episode runs, graphs those that repeat, the outermost and slowest first, and then tries `whole_graph`: the
+run's whole call into the model as one graph, its denoising loop and the noise it draws included. Its `cuda_graphs`
+line names the modules, and its `whole_graph` line the call.
 
-```python
-from sequence_ai.engine import cuda_graphs
-
-census_user = cuda_graphs.Census(cuda_graphs.modules_of(model_user))
-for _ in range(3):
-    model_user(observation_user)                                   # one inference, as your code makes it
-    census_user.end_act()
-census_user.close()
-paths_user = [row_user["path"] for row_user in census_user.candidates()]    # the outermost and slowest first
-cuda_graphs.install(model_user, paths_user[:1])
-```
-
-[`examples/graph_a_module.py`](../examples/graph_a_module.py) does all of it on a small flow-style model, and runs on
-a machine with no GPU, where it prints which module it would graph and leaves the model unchanged.
+[`examples/graph_a_module.py`](../examples/graph_a_module.py) runs it on a small flow-style model, and runs on a
+machine with no GPU, where it prints that nothing was captured and leaves the model unchanged.
 
 ## Check it on your GPU
 
-```python
-import torch
-from sequence_ai.engine import cuda_graphs
+Its warm-up lines are the check: each switch that is on was compared with eager mode on every observation, byte for
+byte, and timed against it. A server's `/ping` lists the switches on, and
+`python -m sequence_ai.check http://<gpu>:8000` prints them on the robot.
 
-torch.manual_seed(0)                                     # a policy that draws noise: the same noise for each run
-eager_user = model_user(observation_user)
-cuda_graphs.install(model_user, paths_user[:1])
-torch.manual_seed(0)
-model_user(observation_user)  # a new shape: captured, and checked against eager mode here
-torch.manual_seed(0)
-print(cuda_graphs.same(eager_user, model_user(observation_user)))       # True: a replayed run, byte for byte
-cuda_graphs.ACTIVE = False                               # the same model in eager mode again, to compare timings
-```
-
-[`examples/check_on_a_gpu.py`](../examples/check_on_a_gpu.py) runs the capture on a real GPU and compares every
-output with eager mode's. On a T4, its small flow-style model went from 16.1 ms to 2.4 ms per run: byte for byte on
-inputs the capture never saw, the model's random noise unchanged, a new batch size captured automatically.
+[`examples/check_on_a_gpu.py`](../examples/check_on_a_gpu.py) runs `optimize()` on a real GPU and compares every output
+with eager mode's: on inputs it never saw, the model's random noise unchanged, a new batch size captured on its first
+call. On an L4, its small flow-style model went from 12.09 ms to 1.22 ms per run, with every check passing.
 
 ## What it is safe against
 
 - **A graph whose output differs is never used.**
-- **A failed capture does not change your model's random noise.** The GPU's random generator is swapped for a clone
-  while a capture runs, and restored afterwards.
+- **A failed capture does not change your model's random noise.** Each capture is tried on a clone of the GPU's
+  random generator, and the generator is put back as it was if a capture fails.
 - **What your model checks about its module still holds:** `isinstance`, its type, its methods and its hooks, which
   fire around a replayed call too.
 
@@ -95,6 +77,6 @@ inputs the capture never saw, the model's random noise unchanged, a new batch si
 - **A module called many times per run.** A module called once has one launch sequence to save.
 - **Shapes that repeat.** Each new shape is captured and checked once, so a module gains from a shape's second call
   on. A prompt of a new length is a new shape, captured the first time it occurs.
-- **A CUDA GPU.** Without one, nothing is graphed, which is reported once, and the model runs as before.
+- **A CUDA GPU.** Without one, nothing is graphed, the report says so, and the model runs as before.
 - **torch 2.4 or later,** which lets a capture swap the GPU's random generator; with an earlier torch, nothing is
   captured.

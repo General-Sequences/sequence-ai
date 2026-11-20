@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 General Sequences Company
 # SPDX-License-Identifier: Apache-2.0
 """
-An openpi policy's infer() on a batch (sequence_ai/engine/openpi.py): each observation passes through the input
+An openpi policy's infer() on a batch (examples/serve_openpi_batched.py): each observation passes through the input
 transforms, they are stacked, the model samples them in one call with a key split from the policy's own, and each row
 passes through the output transforms; one output per observation, the dict infer() gives it. A PyTorch model runs one
 observation at a time, through infer(). A policy without infer()'s attributes is refused.
@@ -13,13 +13,19 @@ here without either installed; a real policy's batch is checked against its infe
 """
 from __future__ import annotations
 
+import importlib.util
+import pathlib
 import sys
 import types
 
 import numpy as np
 import pytest
 
-from sequence_ai.engine import openpi
+# the batch function of the example that shows how to write one for openpi's policy (it is not part of the package)
+_EXAMPLE = pathlib.Path(__file__).resolve().parents[2] / "examples" / "serve_openpi_batched.py"
+_SPEC = importlib.util.spec_from_file_location("serve_openpi_batched", _EXAMPLE)
+openpi = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(openpi)
 
 
 def _tree_map(f, tree, *rest):
@@ -134,37 +140,80 @@ def test_what_is_not_an_openpi_policy_is_refused_naming_what_it_lacks():
 
 
 def test_served_with_batch_the_waiting_observations_reach_the_model_together(stand_ins):
-    """The adapter as serve() calls it: the app's thread, its batches, and each robot its own row back."""
+    """The adapter as serve() calls it: the app's thread, its batches - the observations that waited while the policy
+    ran reach it together, none held for others - and each robot its own row back."""
     import asyncio
+    import json
+    import threading
 
     from sequence_ai.engine.serve import App
     from sequence_ai.network import msgpack_io
 
     policy = Policy()
+    gate, started, sample = threading.Event(), threading.Event(), policy._sample_actions
+
+    def held_first(rng, observation, **kwargs):
+        if not started.is_set():
+            started.set()
+            gate.wait(5)                            # the first act holds the policy while the others come
+        return sample(rng, observation, **kwargs)
+
+    policy._sample_actions = held_first
 
     async def go():
         app = App(openpi.batched(policy), batch=[1, 2, 4])
+        batcher, reached = app._batcher, []
+
+        class Reached:                              # the app's batcher, counting the calls that reached it
+            async def __call__(self, *args, **kwargs):
+                reached.append(1)
+                return await batcher(*args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(batcher, name)
+
+        app._batcher = Reached()
         try:
-            async def act(i):
+            async def request(path, body, kind):
                 sent: list = []
-                body = msgpack_io.pack({"state": np.full(4, float(i))})
                 parts = [body]
 
                 async def receive():
-                    return {"type": "http.request", "body": parts.pop(0), "more_body": False}
+                    return {"type": "http.request", "body": parts.pop(0) if parts else b"", "more_body": False}
 
                 async def send(message):
                     sent.append(message)
 
-                scope = {"type": "http", "method": "POST", "path": "/act",
-                         "headers": [(b"content-length", str(len(body)).encode())]}
+                scope = {"type": "http", "method": "POST", "path": path,
+                         "headers": [(b"content-length", str(len(body)).encode()), (b"content-type", kind),
+                                     (b"accept", msgpack_io.MEDIA_TYPE.encode())]}
                 await app(scope, receive, send)
-                return msgpack_io.unpack(sent[1]["body"])
+                return sent[1]["body"]
 
-            return await asyncio.gather(*(act(i) for i in range(4)))
+            async def observe(i):                   # each robot's observation, on its own episode
+                frame = {"seq": 0, "inputs": {"state": np.full(4, float(i))}}
+                await request("/observe", msgpack_io.pack({"episode_id": f"robot{i}", "frames": [frame], "skipped": [],
+                                                           "blocks": {}}), msgpack_io.MEDIA_TYPE.encode())
+
+            async def act(i):                       # and its act after it
+                call = json.dumps({"call": "act", "episode_id": f"robot{i}", "seq": 1}).encode()
+                return msgpack_io.unpack(await request("/act", call, b"application/json"))["outputs"]
+
+            await asyncio.gather(*(observe(i) for i in range(5)))
+            first = asyncio.ensure_future(act(4))
+            while not started.is_set():
+                await asyncio.sleep(0.01)
+            rest = [asyncio.ensure_future(act(i)) for i in range(4)]
+            # the four wait for the policy, each in the batcher before it is let go: a loaded machine hands them over
+            # slowly, and a fixed sleep let it go with three in (MARKET 11-20 saw them split 1, 2, 1)
+            while len(reached) < 5:
+                await asyncio.sleep(0.01)
+            gate.set()
+            return await asyncio.gather(*rest), await first
         finally:
             app.close()
 
-    outputs = asyncio.run(asyncio.wait_for(go(), 10))
-    assert [c["batch"] for c in policy.calls] == [4]
+    outputs, alone = asyncio.run(asyncio.wait_for(go(), 10))
+    assert [c["batch"] for c in policy.calls] == [1, 4]      # the first alone; the four that waited for it, together
     assert [float(o["actions"][0, 0]) for o in outputs] == [8.0 * i + 0.5 * i for i in range(4)]
+    assert float(alone["actions"][0, 0]) == 8.0 * 4

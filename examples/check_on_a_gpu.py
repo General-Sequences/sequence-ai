@@ -1,19 +1,19 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 General Sequences Company
 # SPDX-License-Identifier: Apache-2.0
 """
-cuda_graphs on a real CUDA GPU: the capture itself, which the package's tests replace with a fake.
+optimize() on a real CUDA GPU: the capture itself, which the package's tests replace with a stand-in.
 
     python examples/check_on_a_gpu.py
 
 What it checks, each printed as one RESULT line of JSON:
   env        the GPU, the driver's CUDA, torch
-  census     the census finds the denoiser, called ten times per run with one shape
-  same       five runs on five inputs give the same outputs, byte for byte, as eager mode did before anything was
-             installed; four of them are inputs the capture never saw
-  noise      two consecutive runs draw the noise eager mode would have drawn: a capture leaves the generator unchanged
-  shape      a new batch size is captured automatically and gives the same output
-  report     the shapes captured, and none left in eager mode
-  speed      eager mode against graphed, ms per run
+  on         optimize() turns cuda_graphs on for the denoiser, called ten times per run with one shape
+  same       five runs on five inputs give the same outputs, byte for byte, as eager mode; four of them are inputs
+             optimize() never saw
+  noise      two runs in a row draw the noise eager mode would have drawn: what was captured leaves the generator as
+             eager mode leaves it
+  shape      a new batch size is captured on its first call and gives eager mode's output, then and replayed
+  speed      eager mode against optimized, ms per run
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import time
 
 import torch
 
-from sequence_ai.engine import cuda_graphs
+from sequence_ai.engine import optimize
 
 FAILED: list[str] = []
 
@@ -31,7 +31,7 @@ FAILED: list[str] = []
 def result(check: str, ok: bool, **fields) -> None:
     if not ok:
         FAILED.append(check)
-    print("RESULT " + json.dumps({"check": check, "ok": ok, **fields}), flush=True)
+    print("RESULT " + json.dumps({"check": check, "ok": ok, **fields}, default=str), flush=True)
 
 
 class Block(torch.nn.Module):
@@ -77,6 +77,11 @@ class ActionHead(torch.nn.Module):
         return x
 
 
+def same(a, b) -> bool:
+    """Equal byte for byte: the same shape, dtype and values."""
+    return a.shape == b.shape and a.dtype == b.dtype and torch.equal(a, b)
+
+
 def ms_per_run(model, condition, runs: int = 200) -> float:
     torch.cuda.synchronize()
     start = time.perf_counter()
@@ -94,67 +99,53 @@ def main() -> int:
         return 2
     torch.manual_seed(0)
     model = ActionHead().cuda().eval()
-    twin = copy.deepcopy(model)                              # stays in eager mode: the reference for the graphed one
+    twin = copy.deepcopy(model)                              # stays in eager mode: the reference for the optimized one
     conditions = [torch.randn(1, 256, device="cuda") for _ in range(5)]
 
-    # ── census ──
-    census = cuda_graphs.Census(cuda_graphs.modules_of(model))
-    for _ in range(3):
-        model(conditions[0])
-        census.end_act()
-    census.close()
-    found = census.candidates()
-    result("census", [row["path"] for row in found] == ["denoiser"] and found[0]["calls"] == 10, found=found)
-
-    # ── eager mode's outputs, before anything is installed ──
+    # ── eager mode's outputs, before optimize() runs ──
     eager = []
     for seed, condition in enumerate(conditions):
         torch.manual_seed(seed)
         eager.append(twin(condition))
 
+    # ── on ──: optimize() sees the first condition alone
     printed: list[str] = []
-    graphs = cuda_graphs.install(model, ["denoiser"], say=printed.append)
+    fast = optimize(model, conditions[:1], say=printed.append)
+    graphs = fast.report["switches"]["cuda_graphs"]
+    result("on", graphs["on"] and any(path.endswith("denoiser") for path in graphs.get("modules", [])), on=fast.on,
+           cuda_graphs=graphs, whole_graph=fast.report["switches"]["whole_graph"], printed=printed)
 
-    # ── same ──: the first run captures on conditions[0]; the other four were never seen by the capture
-    same = []
+    # ── same ──: the other four conditions were never seen by optimize()
+    each = []
     for seed, condition in enumerate(conditions):
         torch.manual_seed(seed)
-        same.append(cuda_graphs.same(eager[seed], model(condition)))
-    result("same", all(same), each=same, printed=printed)
+        each.append(same(eager[seed], model(condition)))
+    result("same", all(each), each=each)
 
-    # ── noise ──: no reseeding between two runs, on a newly graphed model so its first run is a capture
-    fresh = copy.deepcopy(twin)
+    # ── noise ──: no reseeding between two runs
     torch.manual_seed(123)
-    a1, a2 = twin(conditions[0]), twin(conditions[0])
-    cuda_graphs.install(fresh, ["denoiser"], say=printed.append)
+    a1, a2 = twin(conditions[1]), twin(conditions[1])
     torch.manual_seed(123)
-    b1, b2 = fresh(conditions[0]), fresh(conditions[0])
-    result("noise", cuda_graphs.same(a1, b1) and cuda_graphs.same(a2, b2),
-           first=cuda_graphs.same(a1, b1), second=cuda_graphs.same(a2, b2))
+    b1, b2 = model(conditions[1]), model(conditions[1])
+    result("noise", same(a1, b1) and same(a2, b2), first=same(a1, b1), second=same(a2, b2))
 
     # ── shape ──: a batch of 4, never seen
     wide = torch.randn(4, 256, device="cuda")
     torch.manual_seed(7)
     want = twin(wide)
     torch.manual_seed(7)
-    captured = model(wide)                                   # run in eager mode, captured, checked
+    first = model(wide)                                      # a new shape: captured, and checked against eager mode
     torch.manual_seed(7)
-    replayed = model(wide)
-    result("shape", cuda_graphs.same(want, captured) and cuda_graphs.same(want, replayed),
-           captured=cuda_graphs.same(want, captured), replayed=cuda_graphs.same(want, replayed))
-
-    report = graphs["denoiser"].report()
-    result("report", report["shapes"] == 2 and report["eager"] == [], report=report, printed=printed)
+    again = model(wide)                                      # replayed
+    result("shape", same(want, first) and same(want, again), first=same(want, first), again=same(want, again))
 
     # ── speed ──
     for _ in range(20):
         model(conditions[0])
-    cuda_graphs.ACTIVE = False
-    eager_ms = ms_per_run(model, conditions[0])
-    cuda_graphs.ACTIVE = True
-    graphed_ms = ms_per_run(model, conditions[0])
-    result("speed", graphed_ms < eager_ms, eager_ms=round(eager_ms, 3), graphed_ms=round(graphed_ms, 3),
-           times=round(eager_ms / graphed_ms, 2))
+        twin(conditions[0])
+    eager_ms, optimized_ms = ms_per_run(twin, conditions[0]), ms_per_run(model, conditions[0])
+    result("speed", optimized_ms < eager_ms, eager_ms=round(eager_ms, 3), optimized_ms=round(optimized_ms, 3),
+           times=round(eager_ms / optimized_ms, 2))
 
     print("RESULT " + json.dumps({"check": "all", "ok": not FAILED, "failed": FAILED}), flush=True)
     return 1 if FAILED else 0

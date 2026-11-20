@@ -13,7 +13,7 @@ export OPENROUTER_API_KEY=...      # your own OpenRouter key
 import sequence_ai
 
 result_user = sequence_ai.chat(
-    "qwen/qwen3-8b",                                   # the model's name on that server
+    "qwen/qwen3-next-80b-a3b-instruct",                # the model's name on that server
     [{"role": "user", "content": "List the steps to put the red block in the bowl."}],
     server="openrouter",
 )
@@ -41,7 +41,7 @@ def run_tool_user(call_user):
     return {"above": arguments_user["object"]}         # your robot's code here
 
 
-conversation_user = sequence_ai.Conversation("qwen/qwen3-8b", server="openrouter",
+conversation_user = sequence_ai.Conversation("qwen/qwen3-next-80b-a3b-instruct", server="openrouter",
                                              system="You plan robot tasks.", tools=tools_user)
 reply_user = conversation_user.send("Put the red block in the bowl.")
 while reply_user.tool_calls:
@@ -58,7 +58,7 @@ print(reply_user.content)
 ```python
 import sequence_ai
 
-stream_user = sequence_ai.chat("qwen/qwen3-8b", [{"role": "user", "content": "Describe the scene."}],
+stream_user = sequence_ai.chat("qwen/qwen3-next-80b-a3b-instruct", [{"role": "user", "content": "Describe the scene."}],
                                server="openrouter", stream=True)
 for piece_user in stream_user:
     print(piece_user, end="", flush=True)
@@ -77,16 +77,3 @@ result_user = sequence_ai.chat("my-model", [{"role": "user", "content": "Hello"}
 ```
 
 `api_key` is sent to an address only when you pass it.
-
-## On General Sequences
-
-Without `server`, the same call runs on General Sequences:
-
-| | `server=` | General Sequences |
-|---|---|---|
-| Key | your own OpenRouter key, or none for a server of your own | `SEQUENCES_API_KEY` |
-| Model | the server's own name, such as `qwen/qwen3-8b` | one of `sequence_ai.models(endpoint="chat")` |
-| `cost_usd` | what the server reports the turn cost, else 0 | what the call was charged |
-| Result | `ChatResult`, or `ChatStream` with `stream=True` | the same |
-
-Your General Sequences key is never sent to a `server`.

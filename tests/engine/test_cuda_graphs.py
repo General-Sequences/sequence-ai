@@ -343,3 +343,128 @@ def test_with_no_gpu_a_mistyped_path_is_still_reported():
     assert said == ["cuda graphs: action_head.denoiser is not in this model: not captured",
                     "cuda graphs: no CUDA GPU available: nothing captured"]
     assert "forward" not in vars(model[0])
+
+
+def test_uninstall_puts_back_a_modules_forward_and_a_method_graphed_by_its_path():
+    holder = SimpleNamespace(dit=_Prepared())
+    got = cuda_graphs.install(holder, ["dit", "dit.forward_prepared"], capture=_fake)
+    assert list(got) == ["dit", "dit.forward_prepared"]
+    assert isinstance(vars(holder.dit)["forward_prepared"], cuda_graphs.Graphed)
+    x = torch.ones(1, 8)
+    assert torch.equal(holder.dit.forward_prepared(x), holder.dit.lin(x) * 2)
+    assert cuda_graphs.uninstall(holder, ["dit", "dit.forward_prepared", "dit.nothing"]) == \
+        ["dit", "dit.forward_prepared"]
+    assert "forward" not in vars(holder.dit) and "forward_prepared" not in vars(holder.dit)
+    assert torch.equal(holder.dit(x), holder.dit.lin(x))
+
+
+def test_a_path_that_names_neither_a_module_nor_a_method_of_one_is_reported():
+    said: list = []
+    holder = SimpleNamespace(dit=_Prepared(), name="toy")
+    assert cuda_graphs.install(holder, ["name"], say=said.append, capture=_fake) == {}
+    assert said == ["cuda graphs: name is not a torch module or a method of one: not captured"]
+
+
+class _Sampler(torch.nn.Module):
+    """A flow model whose run is a method: its noise drawn in it, its denoiser called 3 times."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.dit = _Net()
+
+    def sample(self, c):
+        x = torch.randn(1, 8)
+        for _ in range(3):
+            x = self.dit(x + c)
+        return x
+
+
+class _Cached(_Fake):
+    """A graph that returns what it computed when it was made, drawing nothing when replayed."""
+
+    def __init__(self, inner, args, kwargs, pool) -> None:
+        super().__init__(inner, args, kwargs, pool)
+        self.out = inner(*args, **kwargs)
+
+    def replay(self, args, kwargs):
+        self.replays += 1
+        return self.out.clone()
+
+
+def test_a_whole_call_is_kept_when_its_replay_draws_what_eager_mode_drew_and_never_otherwise():
+    model, said = _Sampler(), []
+    graphed = cuda_graphs.install(model, ["sample"], say=said.append, capture=_fake, whole=True)["sample"]
+    assert graphed.bound
+    c = torch.ones(1, 8)
+    torch.manual_seed(5)
+    eager = _Sampler.sample(model, c)                        # the class's own method: eager mode
+    torch.manual_seed(5)
+    assert torch.equal(model.sample(c), eager) and graphed.report()["shapes"] == 1
+    torch.manual_seed(5)
+    assert torch.equal(model.sample(c), eager)               # replayed, from the same random state: the same noise
+    stale = _Sampler()
+    stale.dit = model.dit
+    graphed = cuda_graphs.install(stale, ["sample"], say=said.append, capture=_Cached, whole=True)["sample"]
+    torch.manual_seed(5)
+    stale.sample(c)
+    assert graphed.report()["shapes"] == 0 and graphed.report()["eager"] == [["differs", ""]]
+
+
+def test_a_module_called_inside_another_graphs_capture_runs_in_eager_mode():
+    model = _Sampler()
+    _Fake.made = []
+    inner = cuda_graphs.install(model, ["dit"], capture=_fake)["dit"]
+    outer = cuda_graphs.install(model, ["sample"], capture=_fake, whole=True)["sample"]
+    model.sample(torch.ones(1, 8))
+    assert outer.report()["shapes"] == 1 and inner.report()["shapes"] == 0     # inside the whole call's capture
+    assert len(_Fake.made) == 2                                  # the whole call's two captures, and nothing else
+    cuda_graphs.uninstall(model, ["sample"])
+    model.sample(torch.ones(1, 8))
+    assert inner.report()["shapes"] == 1                       # alone again, the module captured on its own
+
+
+class _Features(dict):
+    """A model's feature dict: a dict of another class, its fields read as attributes too."""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+
+class _Reads(torch.nn.Module):
+    def forward(self, features):
+        assert isinstance(features, _Features), "features must be the model's own class"
+        return {"out": features.x * 2}
+
+
+def test_a_mapping_of_another_class_is_keyed_on_and_given_back_as_its_own_class():
+    holder = SimpleNamespace(net=_Reads())
+    _Fake.made = []
+    got = cuda_graphs.install(holder, ["net"], capture=_fake)["net"]
+    out = holder.net(_Features(x=torch.ones(2)))
+    assert torch.equal(out["out"], torch.full((2,), 2.0)) and got.report()["shapes"] == 1 and got.unkeyed == 0
+    assert isinstance(cuda_graphs._static(_Features(x=torch.ones(2))), _Features)
+
+
+def test_calls_finds_the_outermost_method_first_then_the_calls_within_it():
+    model = _Sampler()
+    calls = cuda_graphs.Calls(cuda_graphs.modules_of({"model": model}))
+    for _ in range(2):
+        with calls.run():
+            model.sample(torch.ones(1, 8))
+    found = [row["path"] for row in calls.outermost()]
+    assert found == ["model.sample", "model.dit"]
+    assert calls.outermost()[1]["calls"] == 3
+
+
+def test_the_census_takes_every_candidate_when_asked_for_all():
+    heads = torch.nn.ModuleDict({f"h{i}": _Head() for i in range(6)})
+    census = cuda_graphs.Census({"heads": heads})
+    for _ in range(2):
+        for head in heads.values():
+            head(torch.ones(1, 8))
+        census.end_act()
+    census.close()
+    assert len(census.candidates(min_ms=0.0)) == 4 and len(census.candidates(min_ms=0.0, most=None)) == 6

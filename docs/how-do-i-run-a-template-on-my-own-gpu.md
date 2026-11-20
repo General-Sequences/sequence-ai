@@ -17,8 +17,9 @@ On the robot, only the address changes:
 ```python
 import sequence_ai
 
-link_user = sequence_ai.connect("http://my-gpu:8000")          # a deployment: sequence_ai.connect("my_pi05_user")
-answer_user = link_user.act(observation_user)
+policy_user = sequence_ai.connect("http://my-gpu:8000")
+policy_user.observe(observation_user)
+answer_user = policy_user.act()
 ```
 
 ## What `seq serve` does
@@ -63,8 +64,9 @@ seq serve --port 8000
 ```python
 import sequence_ai
 
-link_user = sequence_ai.connect("http://127.0.0.1:8000")
-print(link_user.act({"state": [0.0], "target": [0.5]}))        # {'delta': [0.1]}
+policy_user = sequence_ai.connect("http://127.0.0.1:8000")
+policy_user.observe({"state": [0.0], "target": [0.5]})
+print(policy_user.act())                                       # {'delta': [0.1]}
 ```
 
 ## Your own weights

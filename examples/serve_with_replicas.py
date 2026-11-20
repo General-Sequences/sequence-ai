@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 General Sequences Company
 # SPDX-License-Identifier: Apache-2.0
 """
-A model served by two replicas, each in its own process, with the calls waiting for it batched and its denoiser
-graphed where there is a GPU: three components together, around a small model defined here.
+A model served by two replicas, each in its own process, with the calls waiting for it batched and the model made
+faster by optimize() where there is a GPU: three components together, around a small model defined here.
 
+    pip install sequence-ai torch
     python examples/serve_with_replicas.py
 
 In your own server, `batcher(observation)` is what each request's handler awaits.
@@ -22,7 +23,7 @@ def load():
     """Runs in each replica's own process: build the model there, and return what a batch of calls runs."""
     import torch
 
-    from sequence_ai.engine import cuda_graphs
+    from sequence_ai.engine import optimize
 
     class Denoiser(torch.nn.Module):
         def __init__(self, width: int = 256) -> None:
@@ -48,7 +49,8 @@ def load():
     torch.manual_seed(0)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = ActionHead().to(device).eval()
-    cuda_graphs.install(model, ["denoiser"], say=lambda line: None)      # on a GPU: graphed; elsewhere: unchanged
+    batches = [torch.zeros(size, 256, device=device) for size in (1, 2, 4, 8)]        # the batch sizes it will get
+    optimize(model, batches, say=lambda line: None)        # on a GPU, faster where the outputs stay the same
 
     def run(observations: list) -> list:
         """One forward pass for the whole batch; each call gets its own row back, with the replica that ran it."""
