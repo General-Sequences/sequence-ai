@@ -8,7 +8,7 @@
 <h3 align="center">Serve robot policies from GPUs anywhere</h3>
 
 <p align="center">
-| <a href="https://generalsequences.com/docs/open-source/"><b>Documentation</b></a> | <a href="https://generalsequences.com/blog/"><b>Blog</b></a> | <a href="https://generalsequences.com/papers/scaling-robot-policies-over-wide-area-networks.pdf"><b>Paper</b></a> | <a href="https://x.com/generalsequence"><b>Twitter/X</b></a> |
+| <a href="https://generalsequences.com/"><b>Platform</b></a> | <a href="https://generalsequences.com/docs/open-source/"><b>Documentation</b></a> | <a href="https://generalsequences.com/blog/"><b>Blog</b></a> | <a href="https://generalsequences.com/papers/scaling-robot-policies-over-wide-area-networks.pdf"><b>Paper</b></a> | <a href="https://x.com/generalsequence"><b>Twitter/X</b></a> |
 </p>
 
 <p align="center">
