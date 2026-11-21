@@ -6,27 +6,31 @@
 </p>
 
 <p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/hero-dark.png">
+    <img alt="Ten robot tables, each robot connected to one GPU" src="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/hero-light.png" width="720">
+  </picture>
+</p>
+
+<p align="center">
   <a href="https://github.com/General-Sequences/sequence-ai/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/General-Sequences/sequence-ai/actions/workflows/tests.yml/badge.svg"></a>
   <img alt="pip install sequence-ai" src="https://img.shields.io/badge/pip%20install-sequence--ai-15775C?style=flat-square">
   <img alt="Python 3.9 or later" src="https://img.shields.io/badge/python-3.9%2B-15775C?style=flat-square">
   <a href="https://github.com/General-Sequences/sequence-ai/blob/main/LICENSE"><img alt="license: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-15775C?style=flat-square"></a>
 </p>
 
-SequenceLink is an open-source framework for serving robot policies from remote GPUs over wide-area networks (WANs); its
-package is `sequence-ai`. It is used with openpi, LeRobot, GR00T and Octo policies, and with any policy written as a
-class: `seq serve` serves it from a GPU, and a robot connects to it with `connect()`.
+SequenceLink serves robot policies from GPUs anywhere: the policy runs on a GPU, and the robot connects to it over
+the internet. Its package is `sequence-ai`. It works with openpi, LeRobot, GR00T and Octo policies, and with any policy
+written as a class.
 
-Give it a policy server and a robot. The robot streams what it observes as it is made, each camera as low-latency
-video, and asks for actions on the latest of it: an act names an observation already sent, so sending one picture with
-each act is the case of one frame per act. On the GPU, it replays the module a model calls many times per inference
-from CUDA graphs, with exactly the same outputs, batches several robots' requests in the sizes a policy lists, and
-computes from the slack their action chunks leave how long each request may wait and how many robots one GPU answers
-in time. Together these are SequenceLink, and the same code is General Sequences' hosted platform. Each component is
-one file that can be added to existing code.
+- **The GPU** runs your policy with `seq serve`. It answers each robot with a chunk of actions, can batch robots that ask
+  at the same time (`@seq.concurrent`), and speeds the model up without changing its outputs.
+- **The robot** connects with `connect()`. It streams its cameras as low-latency video and plays the actions, asking
+  for the next chunk before the current one runs out.
 
 <p align="center">
-  <a href="#quick-start">Quick start</a> ·
   <a href="#how-it-fits-together">Architecture</a> ·
+  <a href="#quick-start">Quick start</a> ·
   <a href="#the-problem-by-layer">The problem</a> ·
   <a href="#inference-layer">Inference layer</a> ·
   <a href="#network-layer">Network layer</a> ·
@@ -34,23 +38,33 @@ one file that can be added to existing code.
   <a href="#documentation">Docs</a>
 </p>
 
+## How it fits together
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/architecture-dark.png">
+    <img alt="How it fits together. On the robot: your control loop over sequence_ai.network (connect, openpi, window, frames, wifi_power). Across the WAN, the observation goes to the GPU and the action chunk comes back. On the GPU: your policy over sequence_ai.engine (serve, optimize, load, batcher, replicas, slack) and sequence_ai.network (one_write, ping, tcp_link). Both ends: msgpack_io and latency_stats. Your own link, measured: bench/." src="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/architecture-light.png" width="900">
+  </picture>
+</p>
+
+**`sequence_ai.network`** is the connection between a robot and the GPU its policy runs on. On the robot, `connect()`
+applies the client-side components to one connection, and `openpi.keep()` does the same on the connection that openpi's
+own client holds. On the server, `one_write` and `ping` wrap a uvicorn or a WebSocket server. **`sequence_ai.engine`**
+is the inference layer on the GPU: `seq serve` serves a policy with the server's side of both layers on, `optimize`
+shortens one inference with the speed-ups that keep its outputs exactly the same, `batcher` and `slack` share a GPU among robots, and `replicas` runs one process per GPU. **`bench/`** measures a link before anything is added to it.
+
 ## Install
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate   # Homebrew's and Debian's python3 refuse pip install outside one
-pip install sequence-ai      # both sides, every component, and the camera's video encoder
+pip install sequence-ai
 ```
 
-The open-source framework: the `@seq.policy` decorators and `seq serve`, `connect()` to an address, the inference and
-network components (`sequence_ai.engine`, `sequence_ai.network`), `chat()`, and `seq init` and `seq weights get`, which
-fetch an official template to serve on your own GPU. Python 3.10 or later, on Linux or macOS (3.9 runs `connect()` and
-the components, not `seq` or video). The speed-ups use the torch your model already has (2.4 or later), or its JAX.
-Each component is one file, and most import only the standard library, so copying a file into your project works as
-well.
+The same package goes on the GPU and on the robot: Python 3.10 or later, on Linux or macOS. The speed-ups use your
+model's own torch (2.4 or later) or JAX.
 
 ## Quick start
 
-A policy is a class. Save this as `policy.py`, in a folder of its own:
+**On the GPU**, save this as `policy.py` in a folder of its own:
 
 ```python
 import numpy as np
@@ -70,20 +84,17 @@ class QuickstartPolicy_user:
         return {"actions": np.full((10, 7), float(frame_user.mean()), dtype=np.float32)}
 ```
 
-`@seq.policy` says how its answers play: `hz` steps a second, the first `action_chunk_valid_len` steps of each, the next
-one asked for at step `action_chunk_replan_at`. `@seq.sample` is an episode as your robot plays it, which the model is
-warmed up on before it serves, and `@seq.infer` answers the latest observation with a chunk of actions whose first
-dimension is time. Serve it from your GPU, here this machine, in that folder:
+Then serve it from that folder:
 
 ```bash
 seq serve
 ```
 
 ```text
-serving quickstart-policy-user on port 8000: a robot connects with sequence_ai.connect("http://<this machine>:8000")
+serving quickstart-policy-user on port 8000, each robot held and seated by its time at 15 Hz: a robot connects with sequence_ai.connect("http://<this machine>:8000")
 ```
 
-On the robot, here a second terminal:
+**On the robot**:
 
 ```python
 import numpy as np
@@ -96,54 +107,16 @@ with sequence_ai.connect("http://127.0.0.1:8000") as policy_user:     # your GPU
     print(policy_user.act()["actions"].shape)                           # (10, 7)
 ```
 
-A robot plays an answer a step at a time at `hz`, asks for the next one in the background at `action_chunk_replan_at`
-so that it never waits for one, and holds still while the connection is down:
-[Quickstart: a policy and a robot](https://github.com/General-Sequences/sequence-ai/blob/main/docs/quickstart.md) has
-that loop, about thirty lines, with the output of each step. An official template is served the same way: `seq init
-pi05-libero my_pi05_user` writes its folder, and `seq serve` in it serves it
-([How do I run a template on my own GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-run-a-template-on-my-own-gpu.md)).
-You can serve a policy on a GPU of your own, as here, or deploy it to
-[General Sequences](https://generalsequences.com/docs/deploy/).
+The robot plays 15 steps a second (`hz`), uses the first 8 steps of each chunk (`action_chunk_valid_len`), and asks for
+the next chunk at step 5 (`action_chunk_replan_at`). [Quickstart](https://github.com/General-Sequences/sequence-ai/blob/main/docs/quickstart.md) has the whole loop. Names ending in
+`_user` are yours to change.
 
-Both sides' defaults are on: a frame marked `Video` goes as low-latency video (H.264, a keyframe every second), a
-depth map marked `Depth` losslessly, an act names the latest observation instead of sending it again, a ping keeps the
-connection between acts, and the policy runs on a thread of its own and is warmed up before the server says it is
-ready.
-[What is on by default](https://github.com/General-Sequences/sequence-ai/blob/main/docs/what-is-on-by-default.md) lists each part and how to turn it off, and
-`python -m sequence_ai.check http://your-gpu:8000` says which are on.
-
-The components also work in a policy server you already run, a file each:
-[Parts for a server you already run](https://github.com/General-Sequences/sequence-ai/blob/main/docs/parts-for-a-server-you-already-run.md)
-has `cuda_graphs`, batching and `slack`, and the openpi and LeRobot clients.
-
-Each name ending in `_user` is yours: your model, your frames, your handler. The repository's quick start runs on a
-laptop with no GPU and no model too:
-
-```bash
-git clone https://github.com/General-Sequences/sequence-ai && cd sequence-ai
-seq serve examples/quickstart_policy & python examples/quickstart_robot.py              # a policy and a robot
-```
-
-Its first line:
-
-```text
-the first answer: 8 steps of 7 joints, the first [128. 128. 128.]
-```
-
-## How it fits together
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/architecture-dark.png">
-    <img alt="How it fits together. On the robot: your control loop over sequence_ai.network (connect, openpi, window, frames, wifi_power). Across the WAN, the observation goes to the GPU and the action chunk comes back. On the GPU: your policy over sequence_ai.engine (serve, optimize, load, batcher, replicas, slack) and sequence_ai.network (one_write, ping, tcp_link). Both ends: msgpack_io and latency_stats. Your own link, measured: bench/." src="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/architecture-light.png" width="900">
-  </picture>
-</p>
-
-**`sequence_ai.network`** is the connection between a robot and the GPU its policy runs on. On the robot, `connect()`
-applies the client-side components to one connection, and `openpi.keep()` does the same on the connection that openpi's
-own client holds. On the server, `one_write` and `ping` wrap a uvicorn or a WebSocket server. **`sequence_ai.engine`**
-is the inference layer on the GPU: `seq serve` serves a policy with the server's side of both layers on, `optimize`
-shortens one inference with the speed-ups that keep its outputs exactly the same, `batcher` and `slack` share a GPU among robots, and `replicas` runs one process per GPU. **`bench/`** measures a link before anything is added to it.
+- **An official template**: `seq init pi05-libero my_pi05_user`, then `seq serve` in that folder
+  ([how](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-run-a-template-on-my-own-gpu.md)).
+- **Both halves on one machine**: in a clone of this repository, `seq serve examples/quickstart_policy & python examples/quickstart_robot.py`.
+- **A server you already run**: [its parts](https://github.com/General-Sequences/sequence-ai/blob/main/docs/parts-for-a-server-you-already-run.md), one file each.
+- **What is on by default**: [each part, and how to turn it off](https://github.com/General-Sequences/sequence-ai/blob/main/docs/what-is-on-by-default.md).
+- **GPUs run for you**: deploy the same folder to [General Sequences](https://generalsequences.com/docs/deploy/).
 
 ## The problem, by layer
 
