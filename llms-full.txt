@@ -14,14 +14,7 @@ The map of the repository, file by file, is https://github.com/General-Sequences
 
 Source: https://github.com/General-Sequences/sequence-ai/blob/main/README.md
 
-SequenceLink serves robot policies from GPUs anywhere: the policy runs on a GPU, and the robot connects to it over
-the internet. Its package is `sequence-ai`. It works with openpi, LeRobot, GR00T and Octo policies, and with any policy
-written as a class.
-
-- **The GPU** runs your policy with `seq serve`. It answers each robot with a chunk of actions, can batch robots that ask
-  at the same time (`@seq.concurrent`), and speeds the model up without changing its outputs.
-- **The robot** connects with `connect()`. It streams its cameras as low-latency video and plays the actions, asking
-  for the next chunk before the current one runs out.
+<h3 align="center">Serve robot policies from GPUs anywhere</h3>
 
 ## How it fits together
 

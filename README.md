@@ -5,6 +5,12 @@
   </picture>
 </p>
 
+<h3 align="center">Serve robot policies from GPUs anywhere</h3>
+
+<p align="center">
+| <a href="https://generalsequences.com/docs/open-source/"><b>Documentation</b></a> | <a href="https://generalsequences.com/blog/"><b>Blog</b></a> | <a href="https://generalsequences.com/papers/scaling-robot-policies-over-wide-area-networks.pdf"><b>Paper</b></a> | <a href="https://x.com/generalsequence"><b>Twitter/X</b></a> |
+</p>
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/General-Sequences/sequence-ai/main/docs/hero-dark.png">
@@ -18,15 +24,6 @@
   <img alt="Python 3.9 or later" src="https://img.shields.io/badge/python-3.9%2B-15775C?style=flat-square">
   <a href="https://github.com/General-Sequences/sequence-ai/blob/main/LICENSE"><img alt="license: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-15775C?style=flat-square"></a>
 </p>
-
-SequenceLink serves robot policies from GPUs anywhere: the policy runs on a GPU, and the robot connects to it over
-the internet. Its package is `sequence-ai`. It works with openpi, LeRobot, GR00T and Octo policies, and with any policy
-written as a class.
-
-- **The GPU** runs your policy with `seq serve`. It answers each robot with a chunk of actions, can batch robots that ask
-  at the same time (`@seq.concurrent`), and speeds the model up without changing its outputs.
-- **The robot** connects with `connect()`. It streams its cameras as low-latency video and plays the actions, asking
-  for the next chunk before the current one runs out.
 
 <p align="center">
   <a href="#how-it-fits-together">Architecture</a> ·
