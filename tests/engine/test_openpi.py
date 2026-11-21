@@ -142,6 +142,7 @@ def test_what_is_not_an_openpi_policy_is_refused_naming_what_it_lacks():
 def test_served_with_batch_the_waiting_observations_reach_the_model_together(stand_ins):
     """The adapter as serve() calls it: the app's thread, its batches - the observations that waited while the policy
     ran reach it together, none held for others - and each robot its own row back."""
+    pytest.importorskip("sequence_base")                 # serve() takes each robot's stream, which needs sequence-base
     import asyncio
     import json
     import threading

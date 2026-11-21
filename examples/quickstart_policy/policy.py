@@ -11,6 +11,7 @@ which the server warms the model up on before it says it is ready. @seq.infer an
 chunk of actions, its first dimension time. docs/quickstart.md walks through it with examples/quickstart_robot.py.
 """
 import numpy as np
+
 import seq
 
 

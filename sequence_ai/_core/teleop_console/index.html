@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teleop</title>
+<style>
+  :root {
+    --bg: #f4f5f2; --panel: #ffffff; --ink: #121411; --muted: #5d6359; --line: #d9dcd4;
+    --go: #1f7a3f; --warn: #a15c00; --stop: #c62a1f; --stop-ink: #ffffff; --screen: #0d0f0c;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f110e; --panel: #171a16; --ink: #ecefe8; --muted: #9aa294; --line: #2a2f27;
+      --go: #4cc274; --warn: #e0a33a; --stop: #e5483c; --stop-ink: #ffffff; --screen: #050605;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: grid; grid-template-rows: auto 1fr auto;
+  }
+  .bar, .controls { padding: 10px max(16px, env(safe-area-inset-left)); background: var(--panel); border-color: var(--line); }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; justify-content: space-between;
+         border-bottom: 1px solid var(--line); }
+  .who { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
+  .who b { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); align-self: center; flex: none; }
+  .dot[data-state="yours"] { background: var(--go); }
+  .dot[data-state="human"] { background: var(--warn); }
+  .dot[data-state="stopped"] { background: var(--stop); }
+  .muted { color: var(--muted); }
+  .figs { display: flex; gap: 18px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .figs b { color: var(--ink); font-weight: 600; }
+  main { min-height: 0; padding: 12px max(16px, env(safe-area-inset-left)); }
+  .view { height: 100%; min-height: 240px; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          align-content: start; }
+  .cam { margin: 0; background: var(--screen); border-radius: 6px; overflow: hidden; position: relative; }
+  .cam video, .cam moq-watch canvas { display: block; width: 100%; height: auto; max-height: 70vh; object-fit: contain; }
+  .cam moq-watch { display: block; }
+  .cam figcaption { position: absolute; left: 8px; top: 6px; font-size: 12px; color: #e8ebe4;
+                    background: rgba(0, 0, 0, 0.55); padding: 1px 6px; border-radius: 3px; }
+  .state { grid-column: 1 / -1; margin: 0; padding: 48px 0; text-align: center; color: var(--muted); font-size: 15px; }
+  .controls { border-top: 1px solid var(--line); display: grid; gap: 8px; }
+  .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+  button { font: inherit; font-weight: 600; padding: 9px 18px; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--bg); color: var(--ink); cursor: pointer; min-width: 96px; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button.stop { background: var(--stop); color: var(--stop-ink); border-color: var(--stop); min-width: 140px; margin-left: auto; }
+  .said { margin: 0; min-height: 1.4em; color: var(--warn); }
+  .fields { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; color: var(--muted); font-size: 13px; }
+  .fields label { display: flex; gap: 6px; align-items: center; }
+  .fields input[type="checkbox"] { width: auto; }
+  .fields input { font: inherit; padding: 5px 8px; border-radius: 5px; border: 1px solid var(--line); background: var(--bg);
+                  color: var(--ink); width: 14em; max-width: 60vw; }
+  .fields button { padding: 5px 12px; min-width: 0; font-weight: 500; }
+  @media (max-width: 480px) { button.stop { margin-left: 0; flex-basis: 100%; } }
+</style>
+<script type="module" src="/assets/console.js"></script>
+</head>
+<body>
+<header class="bar">
+  <div class="who"><span class="dot" id="dot"></span><b id="robot">robot</b><span id="who" class="muted"></span>
+    <span id="path" class="muted" title="How pictures and commands go: straight between this browser and the robot, or through the relay its server names"></span></div>
+  <div class="figs" title="Frame: the robot's observe() to this screen, p50 / p95. Round trip: browser to robot and back, p50.">
+    <span>Frame <b id="frame">—</b></span><span>Round trip <b id="rtt">—</b></span>
+  </div>
+</header>
+<main><section id="view" class="view"><p id="state" class="state">Connecting</p></section></main>
+<footer class="controls">
+  <div class="buttons">
+    <button id="take" disabled>Take</button>
+    <button id="release" disabled>Release</button>
+    <button id="vr" hidden disabled title="Drive from a headset: its hands or controllers, held by their grip, move the robot, and its cameras show in it. While you drive.">Enter VR</button>
+    <button id="stop" class="stop" disabled title="Esc">Stop</button>
+  </div>
+  <p id="said" class="said" role="status"></p>
+  <form id="fields" class="fields">
+    <label>Your name <input id="operator" autocomplete="nickname" maxlength="80" placeholder="who drives"></label>
+    <label id="token-field" hidden>Token <input id="token" type="password" autocomplete="off" spellcheck="false"></label>
+    <label title="Never through a relay: where the browser and the robot cannot reach each other directly, it fails saying why"><input id="direct-only" type="checkbox"> Direct only</label>
+    <label title="Drive with a gamepad's sticks or the keys while you drive: left shoulder or Shift held, then the sticks or W/S, A/D, R/F, Q/E; C closes the gripper, V opens it"><input id="pad-keys" type="checkbox"> Gamepad and keys</label>
+    <label id="watch-field" hidden title="Watch through the MoQ relay this server names: the robot uploads once however many watch. Take, Release and Stop need a connection straight to the robot."><input id="watch-only" type="checkbox"> Watch only</label>
+    <button id="again" type="submit">Connect</button>
+  </form>
+</footer>
+</body>
+</html>

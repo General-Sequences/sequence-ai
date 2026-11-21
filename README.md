@@ -56,8 +56,8 @@ shortens one inference with the speed-ups that keep its outputs exactly the same
 pip install sequence-ai
 ```
 
-The same package goes on the GPU and on the robot: Python 3.10 or later, on Linux or macOS. The speed-ups use your
-model's own torch (2.4 or later) or JAX.
+The same package goes on the GPU and on the robot: Python 3.10 or later, on Linux or macOS (a robot can `connect()` from
+3.9). The speed-ups use your model's own torch (2.4 or later) or JAX.
 
 ## Quick start
 
@@ -254,7 +254,7 @@ Inference layer:
 
 | Component | Result | Measured on |
 |---|---|---|
-| `cuda_graphs` | 1.54× faster (224 → 146 ms), exactly the same outputs | GR00T N1.7's diffusion transformer, one L4 |
+| `cuda_graphs` | 1.54× faster (224 → 146 ms), exactly the same outputs | GR00T N1.7's diffusion transformer, one L4, 2026-11-01 |
 | `cuda_graphs` against `torch.compile` | 1.54×, against 1.45× with different outputs (inductor) and 1.00× (cudagraphs) | the same model and GPU |
 | `cuda_graphs` | 6.7× faster (16.1 → 2.4 ms), byte for byte | a small model of many small kernels, one T4 |
 | Batching | up to 1.78× the requests per second (5.99 → 10.66) | π0.5, one L4, batch 16 |
@@ -271,7 +271,7 @@ Network layer:
 | `one_write` | 106.7 ms, not 189.7, for a response | a GET through a tunnel |
 | `sequence_ai.Video` | about 2.5 KB a frame, not 921,600 bytes as an array | a 640×480 camera, a textured background and three moving discs |
 
-[Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) lists every command, and [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench/) measures your own link.
+[Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) lists the network layer's commands, and [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench/) measures your own link.
 
 ## Repository layout
 
@@ -328,7 +328,7 @@ this README and every page of `docs/` in one file.
 ## A note on the numbers
 
 Every number in this README is given with the model, the GPU or the link it was measured on, and
-[Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) lists the command behind each one. What a network component saves depends on the
+[Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) lists the command behind each of the network layer's. What a network component saves depends on the
 link, so [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench/) measures yours before you add anything. Each module's docstring states what the component
 does in one sentence, why, and what was measured.
 
@@ -367,5 +367,5 @@ If you use SequenceLink in research, please cite it:
 
 ## License
 
-[Apache-2.0](https://github.com/General-Sequences/sequence-ai/blob/main/LICENSE). Copyright 2026 General Sequences Company. Parts of two components are adapted from another project, and the
-page `seq eval replay` serves carries others' files: [THIRD_PARTY_NOTICES.md](https://github.com/General-Sequences/sequence-ai/blob/main/THIRD_PARTY_NOTICES.md).
+[Apache-2.0](https://github.com/General-Sequences/sequence-ai/blob/main/LICENSE). Copyright 2026 General Sequences Company. Parts of five components and one example are adapted from three other
+projects: [THIRD_PARTY_NOTICES.md](https://github.com/General-Sequences/sequence-ai/blob/main/THIRD_PARTY_NOTICES.md).

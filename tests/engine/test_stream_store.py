@@ -15,7 +15,9 @@ import asyncio
 
 import pytest
 
-from sequence_ai.engine.stream import StreamError, StreamStore
+pytest.importorskip("sequence_base")       # engine.stream reads sequence-base's codec and limits: Python 3.10 or later
+
+from sequence_ai.engine.stream import StreamError, StreamStore  # noqa: E402
 
 
 def frames_through(observe):

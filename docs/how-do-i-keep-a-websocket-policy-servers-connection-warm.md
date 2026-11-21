@@ -78,8 +78,8 @@ keeps as `connection.latency`.
 ## Why 100 ms
 
 The robot's silence must stay shorter than its retransmission timeout, which is about its RTT plus 200 ms.
-A WebSocket server sends its next ping one interval after the last pong came back, so the robot is silent for the
-interval plus one RTT. An interval under 200 ms is therefore sufficient on a link of any length, and at 100 ms a
+A WebSocket server sends its next ping one interval after the last one (after its pong, in websockets' legacy
+implementation), so the robot is silent for the interval plus one RTT at most. An interval under 200 ms is therefore sufficient on a link of any length, and at 100 ms a
 ping that is lost still leaves the next one inside the limit.
 
 Measured on an RTT of 11.7 ms: pings 190 ms apart still kept the window (an upload after a pause took 1.18
@@ -139,7 +139,7 @@ Run against a stand-in server on one machine, that client sent four pings in 0.4
 ## Tested
 
 - `tests/network/test_ping.py` starts a `websockets` server with the options and checks that it pings every interval and
-  that one without them does not. It does the same under uvicorn.
+  that one without them does not; under uvicorn, that a server with the options pings every interval.
 - uvicorn 0.54 takes the options on its `auto`, `websockets-sansio` and `websockets` implementations. uvicorn 0.39's
   `websockets-sansio` sends no pings, so on an older uvicorn leave `ws` at `auto` or pass `ws="websockets"`.
 - The first three rows of the table were taken with the tool in [`bench/`](../bench/), whose server pings on

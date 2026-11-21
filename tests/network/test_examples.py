@@ -46,8 +46,8 @@ def _free_port() -> int:
 
 
 def test_the_readmes_quick_start_runs_as_a_reader_copies_it(tmp_path):
-    """README.md's Quick start: its policy class saved as my_policy_user/policy.py and served with `seq serve`, on a free port
-    where it says 8000, and its robot's lines run against it get a chunk of 10 steps of 7 joints."""
+    """README.md's Quick start: its policy class saved as my_policy_user/policy.py and served with `seq serve`, on a
+    free port where it says 8000, and its robot's lines run against it get a chunk of 10 steps of 7 joints."""
     for need in ("uvicorn", "httpx", "numpy", "sequence_base", "av"):
         if importlib.util.find_spec(need) is None:
             pytest.skip(f"needs {need}")
@@ -58,8 +58,8 @@ def test_the_readmes_quick_start_runs_as_a_reader_copies_it(tmp_path):
     (tmp_path / "my_policy_user" / "policy.py").write_text(policy)
     port = _free_port()
     (tmp_path / "robot.py").write_text(robot.replace("8000", str(port)))
-    server = subprocess.Popen([sys.executable, "-m", "seq", "serve", "my_policy_user", "--port", str(port)], cwd=tmp_path,
-                              env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    server = subprocess.Popen([sys.executable, "-m", "seq", "serve", "my_policy_user", "--port", str(port)],
+                              cwd=tmp_path, env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
         deadline = time.time() + 30
         while time.time() < deadline and server.poll() is None:
@@ -93,7 +93,7 @@ serve(model, host="127.0.0.1", port=int(sys.argv[1]),
 
 
 def test_the_quickstart_robot_plays_its_servers_answers():
-    for need in ("uvicorn", "httpx", "numpy"):
+    for need in ("uvicorn", "httpx", "numpy", "sequence_base"):   # its server is serve(): sequence-base
         if importlib.util.find_spec(need) is None:
             pytest.skip(f"needs {need}")
     port = _free_port()

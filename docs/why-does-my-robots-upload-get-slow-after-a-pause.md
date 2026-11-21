@@ -80,7 +80,7 @@ Three machines of one cloud provider, RTTs of 11.7 and 69.2 ms, 20 samples per c
 |---|---|---|
 | BBR on the connection: `window.socket_options()`, `window.keep(sock)` | Linux with the `tcp_bbr` module loaded | yes |
 | `net.ipv4.tcp_slow_start_after_idle=0` | root on the robot | yes |
-| A ping from the robot while idle: `window.Warm`, which `connect()` uses | nothing | no |
+| A ping from the robot while idle: `window.Warm`, or `connect()`'s own | nothing | no |
 | A ping from the server: [`ping`](how-do-i-keep-a-websocket-policy-servers-connection-warm.md) | a WebSocket server | no |
 
 A ping keeps the connection from counting as idle. It does not stop Linux from shrinking a window that the traffic

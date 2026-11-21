@@ -62,7 +62,8 @@ def capacity(times_ms: dict, *, hz: float = 15.0, valid: int = 15, replan: int =
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--times", help="ms a batch of each listed size takes, as 1:256,2:273,4:303,8:377")
-    parser.add_argument("--robots", type=int, help="one number of robots; without it, 1 to the capacity by the buffer")
+    parser.add_argument("--robots", type=int,
+                        help="one number of robots; without it, 1 to the capacity by the buffer, 8 at most")
     parser.add_argument("--hz", type=float, default=15.0)
     parser.add_argument("--valid", type=int, default=15, help="valid steps in a chunk (N)")
     parser.add_argument("--replan", type=int, default=8, help="the step at which the next chunk is requested (k)")

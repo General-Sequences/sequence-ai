@@ -3,12 +3,12 @@
 Replay the module your policy calls many times per run, its denoiser, from CUDA graphs captured from its own eager
 kernels. `seq serve` does that by default while it warms the policy up: it finds the modules, captures them, and keeps
 the graphs only when the outputs on its `@seq.sample` episode equal eager mode's byte for byte and acts are at least
-10% faster. On GR00T N1.7 on an L4, graphing its diffusion transformer reduced a run from 224 ms to 146 ms
-(1.54 times faster) with exactly the same actions. It gains nothing on a model that already fuses and graphs its
+10% faster. On GR00T N1.7 on an L4, `seq serve` graphed its diffusion transformer and the action encoder and
+decoder beside it, and acts went from 149.9 ms to 117.5 ms (1.28 times faster) with exactly the same actions. It gains nothing on a model that already fuses and graphs its
 kernels.
 
 ```bash
-seq serve my_policy_user     # its warm-up prints a line for each switch: on or off, the modules, why
+seq serve my_policy_user     # its warm-up prints a line for each switch it tries: on or off, the modules, why
 ```
 
 Nothing else in your code changes. Each graphed module stays where it is in your model, the same object of the same
@@ -35,7 +35,8 @@ model and GPU:
 | `torch.compile`, inductor | 1.45× | changed: 0.0051 apart on average |
 | `cuda_graphs` | 1.54× (224 ms to 146 ms) | exactly the same, on inputs it was not captured on |
 
-GR00T N1.7 on one L4, its DiT captured.
+GR00T N1.7 on one L4, 2026-11-01: its DiT alone captured by hand, each approach timed against eager mode in the same
+process.
 
 `seq serve` verifies the equality instead of assuming it. It runs the `@seq.sample` episode's observations with fixed
 random states, in eager mode and then with the graphs, and keeps them only if every output is equal byte for byte. After

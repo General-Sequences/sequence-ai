@@ -6,7 +6,7 @@ A module's forward compiled, built by TensorRT or run in float16 (compiled.py). 
   the copy takes no forward put in front of a module's own;
   torch.compile is given the module's own forward and the cache it is to keep;
   an engine's key changes with the weights and the shapes it was built for;
-  TensorRT not installed is said with what to install;
+  TensorRT not installed is said with the torch-tensorrt made for the torch installed here;
   a module of keyword arguments alone is built from its tensors in order, with no precision named beside explicit
   typing, and a call unlike the one it was built for runs the module's own forward;
   tensors inside other values are refused before anything is built.
@@ -16,6 +16,7 @@ A module's forward compiled, built by TensorRT or run in float16 (compiled.py). 
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 
 import pytest
@@ -63,11 +64,22 @@ def test_an_engines_key_changes_with_its_weights_and_shapes():
     assert key != compiled._engine_key(module, (torch.zeros(2, 4),), {}, "fp32", "1")
 
 
-def test_tensorrt_not_installed_says_what_to_install():
+def test_tensorrt_not_installed_says_the_torch_tensorrt_made_for_the_torch_installed(monkeypatch):
     if importlib.util.find_spec("torch_tensorrt") is not None:
         pytest.skip("TensorRT is installed here")
-    with pytest.raises(RuntimeError, match=r"pip install sequence-ai\[tensorrt\]"):
+    with pytest.raises(RuntimeError, match=re.escape(f"TensorRT is not installed: {compiled.tensorrt_install()}")):
         compiled.tensorrt(torch.nn.Linear(2, 2), (torch.zeros(1, 2),), {})
+    # one torch-tensorrt release for each torch minor version, read from torch's own metadata
+    for installed, minor in (("2.9.1", "2.9"), ("2.10.0+cu128", "2.10"), ("2.11.0.dev20251201+cpu", "2.11")):
+        monkeypatch.setattr(compiled.importlib.metadata, "version", lambda name, v=installed: v)
+        said = compiled.tensorrt_install()
+        assert said == f'pip install "torch-tensorrt=={minor}.*" (the one for your torch {minor})'
+
+    def missing(name):
+        raise compiled.importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(compiled.importlib.metadata, "version", missing)
+    assert compiled.tensorrt_install().startswith("pip install torch first")
 
 
 class _FakeTensorRT:

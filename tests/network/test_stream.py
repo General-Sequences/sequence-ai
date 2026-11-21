@@ -155,7 +155,8 @@ def test_a_policy_that_raises_is_said_with_its_type_and_its_words_and_the_next_a
         policy_user.observe({"k": np.int64(2)})
         assert policy_user.act() == 2
         policy_user.close()
-    assert str(raised.value) == "the policy raised ValueError: joint 3 is out of range (the server's log has the traceback)"
+    assert str(raised.value) == ("the policy raised ValueError: joint 3 is out of range (the server's log has the "
+                                 "traceback)")
     assert getattr(raised.value, "remote_traceback", None) is None   # the traceback stays in the server's log
 
 
@@ -296,6 +297,26 @@ def test_two_lines_each_carry_the_stream_and_each_act_takes_the_first_answer():
     assert answers == list(range(10))
     assert [line["line"] for line in each] == [_LOOPBACK, _LOOPBACK] and all(line["open"] for line in each)
     assert sum(line["first"] for line in each) == 10 and all(line["acts"] >= 1 for line in each)
+
+
+@_bound
+def test_an_act_both_lines_carry_runs_once_on_a_policy_that_keeps_state():
+    """Each act goes on every open line under its one request id: a policy that counts its calls runs each act once,
+    and the robot is handed that one answer, in order."""
+    calls = []
+
+    def counting(observation):
+        calls.append(int(observation["k"]))
+        return len(calls)
+
+    with _serving(serving.App(counting)) as url:
+        policy = sequence_ai.connect(url, lines=[_LOOPBACK, _LOOPBACK])
+        answers = []
+        for k in range(10):
+            policy.observe({"k": np.int64(k)})
+            answers.append(policy.act())
+        policy.close()
+    assert calls == list(range(10)) and answers == list(range(1, 11))
 
 
 @_bound

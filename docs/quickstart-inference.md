@@ -14,11 +14,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install sequence-ai
 ```
 
-The last line it prints:
-
-```text
-Successfully installed annotated-types-0.8.0 anyio-4.16.0 certifi-2026.10.23 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 idna-3.20 pillow-13.0.0 pydantic-2.14.3 pydantic-core-2.50.4 sequence-ai-0.62.0 sequence-base-0.8.12 typing-extensions-4.16.0 typing-inspection-0.4.5
-```
+Its last line names each package it installed, `sequence-ai` and `sequence-base` among them.
 
 The inference components import only the standard library. `optimize` operates on a torch model, or a JAX one, and
 uses the torch or JAX your model already has.

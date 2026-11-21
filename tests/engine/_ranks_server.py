@@ -18,7 +18,7 @@ import sys
 
 import numpy as np
 
-import sequence_ai
+from sequence_ai.engine.serve import serve
 
 EXAMPLE = {"state": np.zeros(7, np.float32)}
 
@@ -125,4 +125,4 @@ if __name__ == "__main__":
         serve_class(port)
     else:
         policy = cfg_policy() if mode == "cfg" else plain_policy()
-        sequence_ai.serve(policy, host="127.0.0.1", port=port, batch=[1, 2], example=EXAMPLE, log_level="warning")
+        serve(policy, host="127.0.0.1", port=port, batch=[1, 2], example=EXAMPLE, log_level="warning")

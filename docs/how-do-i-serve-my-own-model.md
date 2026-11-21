@@ -60,7 +60,7 @@ policy_user.observe({"image": frame_user, "prompt": prompt_user})  # frame_user:
 chunk_user = policy_user.act()["actions"]
 ```
 
-`chunk_user` is the 4 x 7 chunk the policy returned. The picture goes as JPEG and comes back to the policy as the
+`chunk_user` is the 4 x 7 chunk the policy returned. The picture goes as a video keyframe and comes back to the policy as the
 array it reads, as [What is on by default](what-is-on-by-default.md) says.
 
 ## Return an action chunk

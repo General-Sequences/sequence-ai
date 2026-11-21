@@ -48,9 +48,9 @@ read back: infer() measures the call alone, which with JAX returns before the ac
 has no batched path here: its observations run one by one, each through infer() itself.
 
 Adapted from Physical-Intelligence/openpi src/openpi/policies/policy.py (Apache-2.0): batched() is its Policy.infer
-for a list of observations (THIRD_PARTY_NOTICES.md). It reads the attributes infer() reads, which openpi keeps private (_input_transform,
-_sample_actions, _sample_kwargs, _rng, _output_transform), and raises TypeError for a policy without them. openpi is
-imported when batched() is called.
+for a list of observations (THIRD_PARTY_NOTICES.md). It reads the attributes infer() reads, which openpi keeps private
+(_input_transform, _sample_actions, _sample_kwargs, _rng, _output_transform), and raises TypeError for a policy without
+them. openpi is imported when batched() is called.
 """
 from __future__ import annotations
 

@@ -28,8 +28,10 @@ prints that case with no model and no GPU.
   a request that arrives as another batch runs waits for it, and is in time or not depending on how far apart the
   robots' requests fall. No formula has that, so `slack` runs 2, 3 and more robots on a simulated clock, as its
   server loop would serve them, from starts spread evenly over every way their requests can fall in a cycle (64 for
-  two robots, 128 for more). A number of robots is within capacity when at least 95% of their responses are back
-  before their robot's buffer runs out, each start counting the same.
+  two robots, 128 for more). A number of robots is within capacity when no response is late in any start: each robot's
+  loop starts again from the moment it is called, so a fleet can spend a whole episode in any of the ways its requests
+  can fall. `worst=False` asks instead for 95% of the responses back before their robot's buffer runs out, each start
+  counting the same.
 - **Load.** In each of those starts the robots' batches may fill at most 0.9 of a cycle, the time between one robot's
   requests. Past that, responses queue behind each other however the requests are batched.
 

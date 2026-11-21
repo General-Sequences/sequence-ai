@@ -20,8 +20,8 @@ fast_user = sequence_ai.engine.optimize(infer_user, examples_user)    # 32 or mo
 print(fast_user.report["on"])                                          # for example ["cuda_graphs", "whole_graph"]
 ```
 
-`serve(infer_user, ...)` runs the same during its warm-up. Measured: GR00T N1.7 on an L4, its DiT captured, 224 ms to
-146 ms per run, with exactly the same outputs on inputs it was not captured on. The report says which modules were
+`serve(infer_user, ...)` runs the same during its warm-up. Measured with `seq serve`: GR00T N1.7 on an L4, its diffusion
+transformer and the action encoder and decoder graphed, acts from 149.9 ms to 117.5 ms, with exactly the same outputs. The report says which modules were
 graphed and why any switch stayed off, and
 [`examples/check_on_a_gpu.py`](../examples/check_on_a_gpu.py) compares every output with eager mode's on your GPU. [How do I make a PyTorch robot policy faster without changing its
 outputs?](how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)

@@ -439,7 +439,10 @@ def test_tensorrt_not_installed_is_said(monkeypatch):
         pytest.skip("TensorRT is installed here")
     fast = optimize(_policy_of(_Flow().eval()), _examples(), tensorrt=True, tolerance=1e-3, cuda_graphs=False,
                     whole_graph=False, say=lambda line: None)
-    assert "TensorRT is not installed: pip install sequence-ai[tensorrt]" in fast.report["switches"]["tensorrt"]["why"]
+    from sequence_ai.engine.compiled import tensorrt_install
+
+    said = fast.report["switches"]["tensorrt"]["why"]
+    assert f"TensorRT is not installed: {tensorrt_install()}" in said and "sequence-ai[" not in said
 
 
 def test_fp8_on_a_machine_without_it_says_why():

@@ -3,6 +3,26 @@
 What changed in each release of SequenceLink's package, `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
+## 0.66.0 — 2026-11-21
+
+Teleoperation is open source and takes a headset, a gamepad or the keys, `seq serve` runs a template by its name,
+`seq data export` turns recordings into LeRobot v3.0 datasets, and `connect()` runs on Python 3.9 again.
+
+Needs `pip install 'sequence-ai[teleop]'`, on Python 3.11 or later, for teleoperation, and `'sequence-ai[data]'` for a
+LeRobot dataset.
+
+### Added
+
+- `seq teleop serve` pairs a robot with consoles on a machine of your own, and a person drives it from its page or
+  `sequence_ai.teleop()`.
+- `seq serve --cfg-parallel` splits a model's classifier-free guidance across two GPUs, kept where acts get faster
+  and the answers stay within your `--tolerance`.
+
+### Removed
+
+- `@stable`, `@beta` and `sequence_ai.serve` are gone: a template has one version, and `seq serve` serves a
+  `@seq.policy` class.
+
 ## 0.65.0 — 2026-11-20
 
 `sequence-ai` is the open-source framework (a `@seq.policy` class served by `seq serve`, and `connect()` on the

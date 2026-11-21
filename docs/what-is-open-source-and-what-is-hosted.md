@@ -11,11 +11,14 @@ stopping machines, accounts and billing, and building, serving and scoring a hos
 Everything a robot and its GPU run, and what a policy is written with:
 
 - **On the GPU:** `seq serve` and the `@seq.policy` decorators a policy is written with, and the inference components
-  the server uses, which a server of your own can use as well: `cuda_graphs`, `batcher`, `replicas` and `slack` (`sequence_ai/engine/`).
+  the server uses, which a server of your own can use as well: `cuda_graphs`, `batcher` and `slack`, with `replicas` beside them (`sequence_ai/engine/`).
 - **On the robot, and between the two:** `sequence_ai.connect()` and the network components on each end
   (`sequence_ai/network/`), with `openpi` and `lerobot` for the clients and servers of those projects.
 - **A policy and an official template, on your own GPU:** the decorators a policy is written with, and `seq init`,
   `seq serve` and `seq weights get`, which run an official template where you choose.
+- **Teleoperation:** the robot's side, the console - its page and `sequence_ai.teleop()` - the direct connection
+  between them, and `seq teleop serve`, which pairs the two on a machine of your own; with what a robot records,
+  `seq data export`, which makes a LeRobot dataset of it.
 - **Language models:** `sequence_ai.chat()`, with your own key or at a server of your own.
 - **Checking and measuring:** `python -m sequence_ai.check`, which says which defaults are on between a robot and its
   server, and `bench/`, which measures what a pause, a ping and a camera stream cost on your link.
@@ -29,8 +32,9 @@ What decides where a policy runs, and what it costs:
 
 - **A GPU near your robot.** The closest GPU available to a place you give. How it is chosen is the service's.
 - **Machines.** Starting, stopping and billing the GPUs you rent or deploy on.
-- **Hosted deployments.** The same policy folder built and served for you, scaled, with benchmarks and evals, and a
-  robot driven with it in teleoperation.
+- **Hosted deployments.** The same policy folder built and served for you, scaled, with benchmarks and evals.
+- **Pairing by a robot's key.** A console paired with a robot through the service, by the robot's own key, and who
+  drove it in your account's audit trail - the same robot code and the same console as `seq teleop serve`.
 - **Your account.** Keys, limits and billing.
 
 The service's client is not in this package: `sequence-cloud` is its own package, and lets `connect()` take a

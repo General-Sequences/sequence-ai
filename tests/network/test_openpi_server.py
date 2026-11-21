@@ -28,8 +28,8 @@ Image = pytest.importorskip("PIL.Image")
 pytest.importorskip("websockets")
 
 import websockets.asyncio.server as library  # noqa: E402
-from websockets.sync.client import connect  # noqa: E402
 from websockets.exceptions import ConnectionClosedError  # noqa: E402
+from websockets.sync.client import connect  # noqa: E402
 
 from sequence_ai.network import frames, msgpack_io, openpi  # noqa: E402
 from sequence_ai.network.openpi import image_tools  # noqa: E402

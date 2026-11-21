@@ -25,8 +25,9 @@ not have is refused with the names it has, before anything is opened.
   the observations before it, and they are there by whichever line was quicker.
 - **The first answer is used.** The others are read when they come, and `stats()["lines"]` says how much later. An act
   fails only when every line has failed.
-- **The policy runs once.** The copies of an act carry one request id, `X-Seq-Request-Id`, and the server runs the act
-  once and gives each copy that answer; an observation that comes by both lines is kept once.
+- **The policy runs once on a hosted worker.** The copies of an act carry one request id, `X-Seq-Request-Id`, and a
+  hosted worker runs the act once and gives each copy that answer; `seq serve` runs it for each copy. An observation that
+  comes by both lines is kept once.
 - **A line that stops answering collects no queue.** A line still carrying the act before is not given the next one.
 - **A line that drops opens again by itself.** The other lines carry everything meanwhile; the robot's stream ends only
   when every line has.

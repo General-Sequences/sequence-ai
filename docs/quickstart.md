@@ -12,7 +12,7 @@ pip install sequence-ai
 ```
 
 The package brings httpx, which `connect()` uses for its connection, uvicorn, which runs the server, numpy and
-zstandard for arrays, Pillow for pictures, and what the `seq` command needs (pydantic and `sequence-base`).
+zstandard for arrays, Pillow and (on Python 3.10 or later) PyAV for pictures, and what the `seq` command needs (pydantic and `sequence-base`).
 
 ## 2. Write a policy
 
@@ -43,7 +43,7 @@ class QuickstartPolicy_user:
 - **`@seq.sample`** is an episode as your robot plays it: observations and acts, in order. The server warms the model up
   on its first observation before it says it is ready; without a sample, the first robot's act is the model's first.
 - **`@seq.infer`** answers the latest observation with a chunk of actions. Its first dimension is time: row `i` is the
-  step to play `i` steps after the observation it answers.
+  step to play `i` steps after the observation it answers. Without the decorator, a method named `infer` is used.
 
 ## 3. Serve it
 
@@ -56,13 +56,16 @@ seq serve
 It prints:
 
 ```text
-serving quickstart-policy-user on port 8000: a robot connects with sequence_ai.connect("http://<this machine>:8000")
+serving quickstart-policy-user on port 8000, each robot held and seated by its time at 15 Hz: a robot connects with sequence_ai.connect("http://<this machine>:8000")
 INFO:     serving QuickstartPolicy_user.infer_user on http://0.0.0.0:8000 and http://[::]:8000 (GET /stream, POST /observe, POST /act, GET /ping, GET /example, GET /record); one observation per call
-WARNING:  no token: anyone who can reach port 8000 can run the policy (serve(token=...) or $SEQ_SERVE_TOKEN asks for one)
+INFO:     holds and seats each robot by its own time: 15 Hz, 8 valid steps, the next asked for at step 5
+WARNING:  no token: anyone who can reach port 8000 can run the policy (seq serve --token TOKEN or $SEQ_SERVE_TOKEN asks for one)
 INFO:     Started server process [68489]
 INFO:     Waiting for application startup.
+INFO:     optimize: nothing turned on - the policy holds no torch module
 INFO:     Application startup complete.
-INFO:     warm-up: one observation took 0.3 ms, then 0.3 ms
+INFO:     warm-up: one observation took 0.3 ms, then 0.3 ms at the median of 3
+INFO:     seats 1 robot 100 ms away, each robot by the round trip it reports
 INFO:     ready
 ```
 
@@ -162,8 +165,8 @@ The loop is yours, and its five steps keep the robot moving at 15 steps a second
    The connection comes back by itself; there is nothing to connect again. With the server stopped for 2 seconds in
    the middle of a 10-second run, the loop held once, at step 35, and played on when the server was back.
 
-The stand-in policy returns the mean of the frame it was sent, and the frame is all 128. On a Mac on Wi-Fi it also
-prints one warning first: Wi-Fi power saving can hold a robot's packets back, and macOS gives nothing to check it with.
+The stand-in policy returns the mean of the frame it was sent, and the frame is all 128. On Linux, with Wi-Fi power
+saving on, it also prints one warning first: power saving can hold a robot's packets back.
 
 ## 5. Check what is on
 
@@ -176,7 +179,7 @@ It prints:
 ```text
 sequence-ai check: http://127.0.0.1:8000
 
-  ok  server              sequence-ai 0.64.1, pid 68489, up 9 s, policy QuickstartPolicy_user.infer_user; it answers /ping with 200 and takes the robot's stream (x-seq-stream/3)
+  ok  server              sequence-ai 0.66.0, pid 68489, up 9 s, policy QuickstartPolicy_user.infer_user, no speed-up on; it answers /ping with 200 and takes the robot's stream (x-seq-stream/3)
   ok  round trip          0.3 ms for a ping on a kept connection (median of 10); 0.0 ms for a TCP connect
   ok  send window         macOS keeps a connection's send window through pauses
   --  BBR                 macOS has no BBR, and needs none for the window

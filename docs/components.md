@@ -162,7 +162,7 @@ bytes each interval, and the robot's kernel never counts the connection idle. No
 took 3.0 round trips; with the server pinging every 100 ms it took 1.1 (100 KB and 500 KB) and 1.25 (1 MB).
 
 A server that answers one HTTP request with one response cannot send anything unsolicited. There the ping comes from the
-robot: `window.Warm`, which `connect()` applies to its connection. [How do I keep a WebSocket policy server's connection
+robot: `window.Warm`, or the same pings `connect()` sends on its own stream. [How do I keep a WebSocket policy server's connection
 warm?](how-do-i-keep-a-websocket-policy-servers-connection-warm.md) has the rest.
 
 `python examples/components/ping.py` printed:

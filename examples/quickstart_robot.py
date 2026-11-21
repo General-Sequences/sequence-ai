@@ -5,8 +5,8 @@ Quickstart, robot side: the robot's own loop. Each answer is played a step at a 
 for in the background at its replan step, so the robot never waits; the steps that passed on the way are skipped, and
 the arm is held still while the server cannot answer.
 
-    python quickstart_robot.py                           # against `seq serve examples/quickstart_policy` on this machine
-    python quickstart_robot.py http://YOUR_GPU:8000      # against the same policy on your GPU
+    python quickstart_robot.py                       # against `seq serve examples/quickstart_policy` on this machine
+    python quickstart_robot.py http://YOUR_GPU:8000  # against the same policy on your GPU
 
 An answer's first dimension is time: its row i is the step to play i steps after the observation it answers.
 docs/quickstart.md walks through it.

@@ -17,12 +17,13 @@ policy_user = sequence_ai.connect("http://YOUR_GPU:8000")  # on the robot
 |---|---|---|
 | The policy's thread | The policy runs on one thread of its own, one call at a time. Acts that arrive meanwhile wait their turn, in order; pings and uploads are not held behind it | always on |
 | Batching | Off: one observation per call | `@seq.concurrent(sizes=[1, 2, 4, 8])` on `@seq.infer`: it takes the observations waiting, stacked, and returns a row for each |
+| Seats | With `hz` on `@seq.policy`: a robot is let in at its first act only where every robot let in is still answered in time; another robot's act is refused `503`, saying why | `@seq.policy` without `hz`: off |
 | Addresses | Every address of the machine: `0.0.0.0`, and `::` where it has IPv6 | `seq serve --host 127.0.0.1`: this machine only |
 | The robot's stream | Each robot's observations and acts on one WebSocket (`GET /stream`), each message answered as a request; `X-Seq-Act-Formats` names it on every response | always on |
 | Observations | Kept by episode, in order; a robot's `Video`, `Depth` and `Tactile` items turned back into the arrays they were. One that did not come is asked for again, and the act waits for it | always on |
-| Ping | `GET /ping` is answered at once: `503` with `Retry-After` until the warm-up is done, then `200` with what the server is, as JSON (`server`, `version`, `up_s`, `pid`, `policy`) | always on |
+| Ping | `GET /ping` is answered at once: `503` with `Retry-After` until the warm-up is done, then `200` with what the server is, as JSON (`server`, `version`, `up_s`, `pid`, `policy`, `optimized`) | always on |
 | Identity | `X-Seq-Server: sequence-ai/<version>` on every response, so a robot can tell `seq serve` from another program at its address | always on |
-| Warm-up | With `@seq.sample`, the policy runs on its first observation twice at each batch size before `/ping` says ready; `GET /example` hands it out | leave out `@seq.sample` |
+| Warm-up | With `@seq.sample`, the policy runs on its first observation twice at each batch size, four times when it declares `hz`, before `/ping` says ready; `GET /example` hands it out | leave out `@seq.sample` |
 | Inputs | The observation as the robot made it, numpy arrays as arrays, each the policy's own to write into | always on |
 | Outputs | torch tensors and JAX arrays are sent as numpy arrays (bfloat16 as float32), copied on the policy's thread | always on |
 | One write | Each response leaves the server in one write | always on |
@@ -62,7 +63,7 @@ Against the [Quickstart](quickstart.md)'s server on a Mac, it printed:
 ```text
 sequence-ai check: http://127.0.0.1:8000
 
-  ok  server              sequence-ai 0.64.1, pid 68489, up 9 s, policy QuickstartPolicy_user.infer_user; it answers /ping with 200 and takes the robot's stream (x-seq-stream/3)
+  ok  server              sequence-ai 0.66.0, pid 68489, up 9 s, policy QuickstartPolicy_user.infer_user, no speed-up on; it answers /ping with 200 and takes the robot's stream (x-seq-stream/3)
   ok  round trip          0.3 ms for a ping on a kept connection (median of 10); 0.0 ms for a TCP connect
   ok  send window         macOS keeps a connection's send window through pauses
   --  BBR                 macOS has no BBR, and needs none for the window

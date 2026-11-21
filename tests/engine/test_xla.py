@@ -183,7 +183,8 @@ def test_command_buffers_stay_on_where_they_are_faster_and_the_outputs_the_same(
     switch = fast.report["switches"]["cuda_graphs"]
     assert switch["on"] and switch["xla_options"] == {"xla_gpu_graph_min_graph_size": 1}
     # its while loops add nothing here: judged, and no faster than the straight-line buffers
-    assert not fast.report["switches"]["whole_graph"]["on"] and "faster" in fast.report["switches"]["whole_graph"]["why"]
+    whole = fast.report["switches"]["whole_graph"]
+    assert not whole["on"] and "faster" in whole["why"]
     assert "not_compared" not in fast.report                  # the key set from each seed: two eager runs drew alike
 
 
@@ -232,4 +233,6 @@ def test_a_jax_policys_command_buffers_are_tried_only_when_asked_and_nothing_is_
     assert fast.on == [] and calls == []                                       # nothing run, nothing compiled
     for name in ("cuda_graphs", "whole_graph"):
         assert fast.report["switches"][name]["why"] == JAX_GRAPHS
-    assert said == [f"optimize: {name} off - {JAX_GRAPHS}" for name in ("cuda_graphs", "whole_graph")]
+    assert said == [f"optimize: {name} off - {JAX_GRAPHS}; turn it on to try it: {name}=True, seq serve --{flag}"
+                    for name, flag in (("cuda_graphs", "cuda-graphs"), ("whole_graph", "whole-graph"))]
+    assert "(True)" not in JAX_GRAPHS and "asked" not in JAX_GRAPHS     # its words, which a platform shows as they are

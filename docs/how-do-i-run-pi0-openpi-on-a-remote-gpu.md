@@ -193,7 +193,7 @@ side by side.
 
 ## If something fails
 
-- `TypeError: this client keeps no WebSocket connection at _ws`: pass the `WebsocketClientPolicy` itself to
+- ``TypeError: this client keeps no WebSocket connection at `_ws` ``: pass the `WebsocketClientPolicy` itself to
   `keep()`, not an `ActionChunkBroker` wrapped around it. Keep the broker for `infer()`.
 - `ConnectionClosedError: sent 1011 (internal error) keepalive ping timeout` on the robot's first `infer()`: openpi's
   server answers no ping while its first inference compiles the model. `openpi.keep(policy)` keeps the connection

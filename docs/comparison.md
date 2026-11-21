@@ -1,14 +1,14 @@
 # How do the components compare with openpi's remote inference and LeRobot's?
 
 It does not replace either one. openpi and LeRobot each ship a complete way to run a policy on a remote GPU: a server
-that loads the model, and a client on the robot that talks to it. The components here load no model. The network layer is a set
+that loads the model, and a client on the robot that talks to it. The network components here load no model. The network layer is a set
 of components for the connection underneath, and you use it in one of three ways:
 
 | You run | You keep | You add from `sequence_ai.network` |
 |---|---|---|
 | openpi | openpi's server and client, unchanged | on the robot, `openpi.keep(policy)`, and `image_tools` from `sequence_ai.network.openpi` for pictures as JPEG; on the GPU, `openpi.patch()` in its server script |
 | LeRobot's remote inference | LeRobot's server and client, unchanged | one Zenoh setting, in a file: `lerobot.keep_alive_file(path)` |
-| your own server | your model and your handler | `connect()` on the robot; `one_write`, `ping`, `compressed`, `tcp_link` on the server |
+| your own server | your model and your handler | `window` and `frames` on the robot; `one_write`, `ping`, `msgpack_io`, `tcp_link` on the server |
 
 This page compares what each one does and does not do, from source inspection: openpi at commit `215abfb`
 (2026-08-24), LeRobot 0.7.0, and this package's components. Results from tests are marked as such. No head-to-head measurement

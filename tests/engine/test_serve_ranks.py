@@ -271,3 +271,18 @@ def test_a_policy_class_under_seq_serve_runs_its_observe_function_acts_and_episo
     assert rank0 == rank1                                            # every observe, act and episode's end, on both
     acts = [line for line in rank0 if line.startswith("act ") and not line.startswith("act seq-")]
     assert len(acts) == len(states) and [line for line in rank0 if line.startswith("observe ")]
+
+
+def test_each_rank_of_a_launcher_sees_its_own_card_alone():
+    """own_card(): the LOCAL_RANK-th card where CUDA_VISIBLE_DEVICES named some, LOCAL_RANK where none; nothing for one
+    process or with no LOCAL_RANK; a rank past the cards named is refused, saying so."""
+    from sequence_ai.engine import ranks
+
+    env = {"WORLD_SIZE": "2", "LOCAL_RANK": "1"}
+    assert ranks.own_card(env) == "1" and env["CUDA_VISIBLE_DEVICES"] == "1"
+    env = {"WORLD_SIZE": "2", "LOCAL_RANK": "1", "CUDA_VISIBLE_DEVICES": "2,3"}
+    assert ranks.own_card(env) == "3" and env["CUDA_VISIBLE_DEVICES"] == "3"
+    for alone in ({"WORLD_SIZE": "1", "LOCAL_RANK": "0"}, {"WORLD_SIZE": "2", "RANK": "1"}, {}):
+        assert ranks.own_card(alone) is None and "CUDA_VISIBLE_DEVICES" not in alone
+    with pytest.raises(ValueError, match="LOCAL_RANK 1 has no card of its own"):
+        ranks.own_card({"WORLD_SIZE": "2", "LOCAL_RANK": "1", "CUDA_VISIBLE_DEVICES": "0"})

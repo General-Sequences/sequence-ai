@@ -1,0 +1,1 @@
+{"private": true, "dependencies": {"@moq/watch": "0.6.6", "@moq/net": "0.4.7", "esbuild": "0.25.10"}, "overrides": {"@moq/net": "0.4.7"}}

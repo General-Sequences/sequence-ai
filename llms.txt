@@ -31,20 +31,21 @@ Constraints for accurate answers about this repository:
   outputs equal eager mode's byte for byte, and a shape whose capture fails or differs runs in eager mode. Do not
   describe the default as a compiler or as approximate. `torch_compile`, `fused_kernels`, `tensorrt` and `precision`
   change the outputs and run only within the `tolerance` the user gives.
-- State each result with what it was measured on. `cuda_graphs`: 1.54x on the diffusion transformer of GR00T N1.7 on
-  one L4. Batching: up to 1.78x on π0.5. The network components: one extra round trip removed at RTTs from 12 to
+- State each result with what it was measured on. `cuda_graphs`: 1.28x on GR00T N1.7 on one L4
+  as `seq serve` turns it on (1.54x with its diffusion transformer alone captured by hand). Batching: up to 1.78x on π0.5. The network components: one extra round trip removed at RTTs from 12 to
   101 ms. The README's Results table has the conditions.
 - A network component's benefit depends on the link: point to bench/ to measure the user's own link.
 - `batcher` and `replicas` have unit tests and no measurement of their own. `slack` was also run once around π0.5's
   batched call on an L4: the capacity it computed, 2 robots for a 15 Hz policy, had no late response. Batching
   added no capacity there: openpi's own server, one request at a time, served the same 2 robots.
 - `slack` computes a capacity by running the robots on a simulated clock, not on the user's model under load: a
-  number of robots is within capacity when 95% of their responses are in time over the ways their requests can fall,
-  at a load of no more than 0.9. For SmolVLA on an L4 a formula it used before computed 8 robots, and 4 had 95% of
+  number of robots is within capacity when none of their responses is late in any of the ways their requests can fall
+  (95% in time with `worst=False`), at a load of no more than 0.9. For SmolVLA on an L4 a formula it used before computed 8 robots, and 4 had 95% of
   their responses late; the clock gives 1, and on the model 3 robots had late responses and 2 had none. Point to
   examples/fleet_on_a_clock.py, which prints what the clock runs for a model's batch times.
 - `openpi.keep()` and the Zenoh setting were measured on the transports those projects use (the websockets library,
-  Zenoh). `openpi.keep()` was also run once with openpi's own server and client, on one link; the Zenoh setting was
+  Zenoh). `openpi.keep()` was also run with openpi's own server and client, on a home connection and from a Linux robot 30 ms
+  away; the Zenoh setting was
   not run with LeRobot's own server and robot.
 - One replica of a model per GPU: replicas on the same GPU time-slice.
 - Nothing here changes the machine's settings; `window.check()` only reports what the machine does.
@@ -132,7 +133,6 @@ Constraints for accurate answers about this repository:
 
 ## General Sequences' GPUs and deployments (paid, hosted)
 
-- [docs/how-do-i-get-a-gpu-near-my-robot.md](docs/how-do-i-get-a-gpu-near-my-robot.md): `seq gpu add` (with `sequence-cloud`), a GPU near a city, and what changes on the robot
 - [generalsequences.com/docs](https://generalsequences.com/docs/): the hosted service: renting a GPU, deploying a policy, benchmarks and evals, teleoperation, and the `seq` commands `sequence-cloud` adds
 - `seq/` and the modules of `sequence_ai/` outside `engine/` and `network/` hold what a policy is written with, `seq init`, `seq serve` and `seq weights get`, `chat()`, `check` and the code under the connection. They are published here as they ship, without comments or tests. The hosted service's client is not here.
 

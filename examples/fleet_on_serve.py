@@ -36,6 +36,7 @@ import httpx
 
 import sequence_ai
 from sequence_ai.engine import slack
+from sequence_ai.engine.serve import serve
 from sequence_ai.errors import Unavailable
 
 TIMES_MS = {1: 80.0, 2: 110.0, 4: 130.0}
@@ -137,7 +138,7 @@ def run(seconds: float = 30.0, start: int = 7, robots: list = ROBOTS, times: dic
     own count, what the server's /ping says at the end, and the clock's count for the robots seated. `robots`: (its
     name, its round trip in ms), the last connecting after the others; `times`: the stand-in's batch times, in ms."""
     port = _free_port()
-    threading.Thread(target=sequence_ai.serve, args=(stand_in(times),), daemon=True,
+    threading.Thread(target=serve, args=(stand_in(times),), daemon=True,
                      kwargs=dict(host="127.0.0.1", port=port, batch=sorted(times), example=OBSERVATION, hz=HZ,
                                  action_chunk_valid_len=VALID, action_chunk_replan_at=REPLAN,
                                  log_level="warning")).start()

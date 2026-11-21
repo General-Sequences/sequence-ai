@@ -28,7 +28,7 @@ answer_user = policy_user.act()
   weights are in.
 - It downloads a template's weights with your key into `~/.cache/sequence-ai/weights/<template>/<version>`, each file
   checked by its sha256. A second run downloads nothing; `seq weights get <template>` downloads them alone.
-- It serves the class's `@seq.infer` with `sequence_ai.serve`: a `@seq.concurrent` policy's acts in its listed batch
+- It serves the class's `@seq.infer`: a `@seq.concurrent` policy's acts in its listed batch
   sizes, stacked into one batch as on the platform.
 - It runs the class's `@seq.shutdown` when you stop it.
 
@@ -74,5 +74,5 @@ print(policy_user.act())                                       # {'delta': [0.1]
 `--weights <folder>` reads a folder instead of downloading, such as your own fine-tune of the template's checkpoint. A
 policy whose weights come in named parts takes `--weights <part>=<folder>` for each.
 
-`seq serve` serves a policy whose `@seq.infer` takes the observation. A policy that keeps each episode's state
-(`@seq.observe`) runs as a deployment, which hands it each robot's episode.
+`seq serve` serves a policy whose `@seq.infer` takes the observation, and one that keeps each episode's state
+(`@seq.observe`) as a deployment does, handing it each robot's episode.

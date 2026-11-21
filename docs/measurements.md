@@ -5,7 +5,8 @@ trips with the defaults, and one with any of the components that keep the connec
 plain TCP, over a WebSocket and over Zenoh, at round-trip times (RTTs) from 11 to 101 ms. At 242 ms the pause cost
 nothing; under 1% packet loss, BBR kept the window.
 
-Everything on this page was measured on 2026-11-15 with [`bench/`](../bench/), as released. It is one pair of machines
+The TCP, WebSocket and Zenoh sections were measured on 2026-11-15 with [`bench/`](../bench/), as released; the openpi
+sections with openpi's own server and client. It is one pair of machines
 on one night. **It is not a promise for your link:**
 [measure yours](how-do-i-measure-the-link-between-my-robot-and-my-gpu.md).
 

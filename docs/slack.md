@@ -43,7 +43,7 @@ the margin before that.
 - **A request's deadline is its buffer, less its robot's RTT, less 50 ms.** The RTT is what the
   robot reports with its request (`outside_ms`, an integer number of ms from 0 to 5000), and 100 ms for a robot that
   reports nothing. A robot that sent its request late reports the playback time it has left (`left_ms`), and that
-  value is used as its deadline.
+  value is used in place of its buffer.
 - **Batch times are measured, not estimated.** `measure` runs each listed size once untimed, then three times. `Table`
   keeps the latest 64 forward passes of each size: their p95 is what a batch is taken to last, for waiting decisions
   and on the clock, and their p50 is what it counts for in the load.
@@ -61,7 +61,7 @@ the margin before that.
   episode in any of the ways its requests can fall. `worst=False` asks instead for 95% of the responses back in time
   over the starts, each start counting the same. The first number
   that fails ends the count: robots are admitted one at a time, so a replica reaches a number of robots through
-  every smaller one. The clock rounds each batch time up by 3% at most and each RTT up to 10 ms, and keeps each
+  every smaller one. The clock rounds each batch time up by at most 1/32 (about 3%) and each RTT up to 10 ms, and keeps each
   verdict by them: a server's timings move by a few ms from one request to the next, and rounded they ask a question
   already answered.
 - **Each robot by its own RTT.** Robots are admitted nearest first, and robots that fit the same batch size are batched
@@ -78,17 +78,27 @@ the margin before that.
   largest listed size its deadline allows, and only where the requests behind it still meet theirs.
 - **A far robot's batch waits one control step at most** for a near robot's request that is due as it would run.
   Dispatched immediately, it would make the near request wait behind it for a full batch time.
-- **A robot that sends nothing for four of its periods is dropped from the schedule**: no batch waits for it.
+- **A robot that sends nothing for four times its chunk's length (N / hz, or its period where that is longer) is dropped
+  from the schedule**: no batch waits for it.
 - **Where a policy sets `max_wait_s`** (up to 60 s), that wait replaces the buffer, for capacity and for the batching
   delay. Its robot may run out of actions, and waits.
 
 ## In a server
 
-`serve()` runs this loop for you. Tell it how a robot plays an answer, and give it an example to time the batches:
+`seq serve` runs this loop for you, in the policy's folder. Declare how a robot plays an answer, list the batch sizes,
+and give the policy a sample to time the batches on:
 
 ```python
-sequence_ai.serve(policy_on_a_list_user, batch=[1, 2, 4], example=observation_user,
-                  hz=20, action_chunk_valid_len=15, action_chunk_replan_at=8)
+@seq.policy(hz=20, action_chunk_valid_len=15, action_chunk_replan_at=8)
+class BatchedPolicy_user:
+    @seq.sample
+    def sample_user(self):
+        return [("observe", observation_user), ("act",)]
+
+    @seq.concurrent(sizes=[1, 2, 4])
+    @seq.infer
+    def infer_user(self, observations_user):
+        return model_on_a_batch_user(observations_user)
 ```
 
 Each robot's `connect()` then names it on every request and reports its round trip and what is left of its chunk.
@@ -149,8 +159,8 @@ serving stack it was taken from.
   (a 467 ms buffer; batches of 1, 2 and 3 in 195, 312 and 429 ms) `per_replica` computed a capacity of 2: 2 robots
   had no late response, 3 had 21% and 26%, and 4 had 99%. At 20 Hz (350 ms) it computed 1, and 2 robots had 40% and
   90% late. The server admitted every robot, so the cells above the capacity show what `seat()` prevents.
-  `per_replica` then computed the load by a formula. On a clock, as now, those capacities are the same, for robots
-  20, 50 or 100 ms away.
+  `per_replica` then computed the load by a formula. On a clock, as now, those capacities are the same for robots
+  20 or 50 ms away; 100 ms away, the 15 Hz capacity is 1 (2 with `worst=False`).
 - **The capacity, on three models.** One L4, simulated robots of a 15 Hz policy 20 ms away, 60 s per cell, with the load
   computed by that formula. For π0.5 and GR00T N1.6 it computed 2, and 2 robots had no late response (0.4% in one cell
   of eight). For SmolVLA (batches of 1, 2, 4 and 8 in 256, 273, 303 and 377 ms) it computed 8, and 4 robots had 95% and
@@ -242,11 +252,11 @@ Sequences serves with. It has not been compared with either.
 | `CLOCK_CYCLES`, `CLOCK_WARM` | 48, 8 | the cycles a start is run for on the clock, and how many of the first are not counted |
 | `CLOCK_STARTS` | 128 | the starts a number of robots is run from on the clock; half as many for two robots |
 | `IN_TIME_MIN` | 0.95 | with `worst=False`, the share of a fleet's responses that must be back before their buffer runs out, over the starts; by default none may be late in any start |
-| `CLOCK_BITS`, `CLOCK_RTT_MS` | 6, 10 | the clock's resolution: a batch time rounded up to 6 significant bits (3% at most), an RTT up to 10 ms |
+| `CLOCK_BITS`, `CLOCK_RTT_MS` | 6, 10 | the clock's resolution: a batch time rounded up to 6 significant bits (at most 1/32, about 3%), an RTT up to 10 ms |
 | `WINDOW` | 64 | the runs kept for each batch size |
 | `RUNS` | 3 | the timed runs of each size, after one untimed |
 | `SERVED_MIN` | 8 | the answered requests after which a size is timed by what its batches took |
 | `OUTSIDE_MAX_MS`, `LEFT_MAX_MS` | 5000, 600000 | the largest values a robot may report for its RTT, and for the playback time it has left |
 | `WAIT_MAX_S` | 60 | the longest `max_wait_s` |
-| `GONE_PERIODS` | 4 | the periods of silence after which a robot is dropped from the schedule |
+| `GONE_PERIODS` | 4 | the chunk lengths (N / hz, or periods where longer) of silence after which a robot is dropped from the schedule |
 | `PERIOD_WEIGHT` | 0.2 | the weight of a new gap between a robot's requests in its estimated period |

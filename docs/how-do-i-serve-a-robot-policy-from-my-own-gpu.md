@@ -38,8 +38,8 @@ policy_user.observe({"image": frame_user, "state": state_user})
 actions_user = policy_user.act()["actions"]
 ```
 
-Both sides' defaults are on: the robot sends pictures as JPEG and compresses large arrays where that saves time, keeps
-its one connection warm with pings, and waits longer for the first answer; the server runs the policy on a thread of
+Both sides' defaults are on: the robot sends each picture as a video keyframe and compresses large arrays where that
+saves time, and keeps its one connection warm with pings; the server runs the policy on a thread of
 its own, answers pings at once, warms the policy up on its sample, and sends torch and JAX outputs back as numpy arrays.
 [What is on by default, and how do I turn each part off?](what-is-on-by-default.md) lists every part with its switch,
 and `python -m sequence_ai.check http://YOUR_GPU:8000` says which are on between your robot and your server.
@@ -133,13 +133,14 @@ A component saves time only on a link that has the cost it removes. Measure befo
 
 | On your link | Add | Measured |
 |---|---|---|
-| A short round-trip time (round-trip time (RTT), about 21 ms) and pauses between requests | `connect()`, or `window` on your own client | 40 of 40 requests took one extra round trip without BBR, none with it |
-| A longer RTT (about 101 or 241 ms), no loss | nothing for the pauses | 0 or 1 of 40 requests took an extra round trip with the default settings |
+| A short round-trip time (RTT, about 21 ms) and pauses between requests | `connect()`, or `window` on your own client | 40 of 40 requests took one extra round trip without BBR, none with it |
+| A long RTT (about 241 ms), no loss | nothing for the pauses | 0 or 1 of 40 requests took an extra round trip with the default settings |
 | A tunnel or proxy in front of the server | `one_write` | GET p50 189.7 ms with headers and body written apart, 106.7 ms in one write |
-| Large raw arrays on a slow uplink | compression, on by default with `seq serve` | 172,800-byte frames came out about 1.9 times smaller for 0.37 ms |
+| Large raw arrays on a slow uplink | compression, on by default in `connect()` | 172,800-byte DROID camera frames came out about 1.9 times smaller by zstd-1, in 0.37 ms |
 | A new connection for each call | keep one open, as `connect()` does | 305.9 ms per call with a new connection, 121.0 ms reusing one |
 
-The conditions behind each row are in the [README](../README.md#results).
+The conditions behind the other rows are in [Components](components.md) and [Why does my robot's upload get slow
+after a pause?](why-does-my-robots-upload-get-slow-after-a-pause.md).
 [How do I measure the link between my robot and my GPU?](how-do-i-measure-the-link-between-my-robot-and-my-gpu.md)
 shows how to get the same numbers for your own link.
 
@@ -149,15 +150,15 @@ shows how to get the same numbers for your own link.
   Start it with one, `SEQ_SERVE_TOKEN=... seq serve`, and connect with `sequence_ai.connect(url, token="...")`; open
   the port only to your robot's address as well.
 - **The first answer.** A model compiled on its first inference takes tens of seconds. `@seq.sample` runs it before
-  the server says it is ready, `wait_until_ready()` waits for that on the robot, and `connect()` gives the first act
-  120 s in any case.
+  the server says it is ready, `wait_until_ready()` waits for that on the robot, and an act waits 30 s for its answer
+  unless `connect(timeout_s=...)` says longer.
 - **Several robots on one GPU.** `@seq.concurrent(sizes=[1, 2, 4, 8])`, above. One replica of a model per GPU:
   [How many robots can one GPU serve?](how-many-robots-can-one-gpu-serve.md)
 - **No GPU near the robot.** [How do I get a GPU near my robot?](how-do-i-get-a-gpu-near-my-robot.md)
 
 ## Plans and episodes
 
-`@seq.plan`, `@seq.observe` and `@seq.on_episode` run on `seq serve` as on a deployment: each robot's episodes are its
+`@seq.plan` (one that declares no `models=`), `@seq.observe` and `@seq.on_episode` run on `seq serve` as on a deployment: each robot's episodes are its
 own, `on_episode` gets `phase="end"` when one ends, and a plan never holds up an act.
 
 ## See also

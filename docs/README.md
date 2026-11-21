@@ -18,6 +18,8 @@ Each page here answers one question, starts with the answer and its code, and ca
   replicas, and the openpi and LeRobot clients, a file each.
 - [Quickstart: batching and replicas](quickstart-inference.md). Two commands, one short file, every step's output.
 - [FAQ: errors you may see, and what to do next](faq.md). Each error as the code prints it.
+- [How do I drive a robot from a console, and record what I do?](how-do-i-drive-a-robot-from-a-console.md).
+  `seq teleop serve`, the robot's loop, the page and `sequence_ai.teleop()`, and `seq data export`.
 
 ## By model
 

@@ -1,8 +1,8 @@
 # Third-party notices
 
-SequenceLink (the `sequence-ai` package) is licensed under the Apache License, Version 2.0. Parts of four of its components, and one of its examples,
-are adapted from two other open-source projects, and the page `seq eval replay` serves carries other projects' files unchanged. Each is named here
-with its license.
+SequenceLink (the `sequence-ai` package) is licensed under the Apache License, Version 2.0. Parts of five of its components, and one of its examples,
+are adapted from three other open-source projects, and the pages `seq eval replay` and `seq teleop serve` serve carry other projects' files
+unchanged. Each is named here with its license.
 
 ## openpi
 
@@ -35,6 +35,18 @@ with its license.
 - **Why:** so that an input is packed to E4M3 with one scale per tensor and rounded as torch's own conversion rounds
   it. Changed as the file's docstring says: any plain linear layer of any float dtype, its forward replaced and the
   layer kept, with a calibration of which layers to run in E4M3.
+- **License:** Apache License, Version 2.0, the same as this project's [LICENSE](LICENSE). The repository carries no
+  NOTICE file.
+
+## xDiT
+
+- **Where:** `sequence_ai/engine/cfg_parallel.py`, a model's classifier-free guidance split between two processes.
+- **From:** `_process_cfg_split_batch` in `xfuser/model_executor/pipelines/base_pipeline.py` and `_backbone_forward` in
+  `xfuser/model_executor/pipelines/pipeline_stable_diffusion_3.py` of
+  [xdit-project/xDiT](https://github.com/xdit-project/xDiT), at commit 5558f7e.
+- **Why:** so that a policy whose model runs its guidance's two halves as one batch runs each half on a GPU of its own.
+  Changed as the file's docstring says: the split made around a model's call, not in a pipeline's own loop; the batch
+  cut in half along its first dimension; the two outputs gathered back into the whole batch's.
 - **License:** Apache License, Version 2.0, the same as this project's [LICENSE](LICENSE). The repository carries no
   NOTICE file.
 
@@ -88,3 +100,20 @@ SOFTWARE.
 
 Each font's copyright notice and the full text of the SIL Open Font License, Version 1.1, travel with the fonts in
 `seq/_replay_player/licenses/`, as the license asks; it is also at <https://openfontlicense.org>.
+
+## Files the teleop console page carries
+
+`seq teleop serve` serves a page from `sequence_ai/_core/teleop_console/`. To watch a robot through a MoQ relay it
+loads `sequence_ai/_core/teleop_console/vendor/moq-watch.js`: MoQ's browser player and the packages it uses, bundled
+and minified unchanged by `tools/moq_watch/build.sh` from the versions `tools/moq_watch/package-lock.json` pins, less
+`@moq/hang`'s audio polyfill.
+
+| Packages | From | License |
+|---|---|---|
+| `@moq/watch` 0.6.6, `@moq/net` 0.4.7, `@moq/hang` 0.5.4 and eight more `@moq/` packages | [moq-dev/moq](https://github.com/moq-dev/moq) and [moq-dev/web-transport](https://github.com/moq-dev/web-transport), Copyright (c) 2023 Luke Curley | MIT or Apache-2.0, used under MIT |
+| `zod` 4.6.7, `@zod/mini` 4.6.7, `async-mutex` 0.5.0, `bowser` 2.15.0, `media-captions` 0.0.18 | their authors, as each license says | MIT |
+| `pako` 3.0.3 | Vitaly Puzrin and Andrei Tuputcyn | MIT and Zlib |
+| `@svta/cml-iso-bmff` 1.0.7, `@svta/cml-utils` 1.8.0 | the Streaming Video Technology Alliance | Apache-2.0 |
+
+Each package's version, license and its full text with its copyright notice travel with the bundle in
+`sequence_ai/_core/teleop_console/vendor/LICENSES.txt`.

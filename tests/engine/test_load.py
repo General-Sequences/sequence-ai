@@ -39,6 +39,7 @@ def test_every_tensor_comes_back_byte_for_byte(tmp_path):
     assert all(block["offset"] % load.ALIGN == 0 for block in head["blocks"])
     got = load.load(path, device="cpu", threads=4, chunk=load.ALIGN)          # many small chunks, many threads
     assert set(got) == set(state) and all(_same(got[name], state[name]) for name in state)
+    pytest.importorskip("ml_dtypes")              # bfloat16 as numpy: ml_dtypes, which JAX installs (3.10 or later)
     arrays = load.load(path, to="numpy", threads=3)
     assert np.array_equal(arrays["encoder.weight"], state["encoder.weight"].numpy())
     assert str(arrays["encoder.bias"].dtype) == "bfloat16" and arrays["steps"].tolist() == list(range(7))

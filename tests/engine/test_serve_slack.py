@@ -2,14 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 serve() holding and seating each robot by the slack its chunk leaves (sequence_ai/engine/serve.py with engine/slack.py):
-how a robot plays an answer, given or refused; the warm-up timing each batch size as slack.measure does, and /ping
-saying how robots play, the robots seated, the seats and the batch times; a robot seated at its first act - each act the
-platform's, its observation posted first - one that would be late beside the seated refused with why at each act, and
-none seated by putting a seated one out; robots that report no round trip seated while seats are left; an act that names
-no robot served, unseated; a robot gone giving its seat up; an act held for a robot due before it must go, and the two
-run as one batch; the platform's own Policy (connect(url)) naming its robot on every act, saying its round trip and what
-is left of the answer it plays (none of a pause), and raising serve()'s words for a robot with no seat; and four robots
-in front of serve() (examples/fleet_on_serve.py): three of them seated and answered, the fourth refused with why.
+how a robot plays an answer, given or refused, and an answer with fewer steps than that warned of; the warm-up timing
+each batch size as slack.measure does, and /ping saying how robots play, the robots seated, the seats and the batch
+times; a robot seated at its first act - each act the platform's, its observation posted first - one that would be late
+beside the seated refused with why at each act, and none seated by putting a seated one out; robots that report no round
+trip seated while seats are left; an act that names no robot served, unseated; a robot gone giving its seat up; an act
+held for a robot due before it must go, and the two run as one batch; the platform's own Policy (connect(url)) naming
+its robot on every act, saying its round trip and what is left of the answer it plays (none of a pause), and raising
+serve()'s words for a robot with no seat; and four robots in front of serve() (examples/fleet_on_serve.py): three of
+them seated and answered, the fourth refused with why.
 
     python -m pytest -q tests/engine/test_serve_slack.py
 """
@@ -27,8 +28,10 @@ import pytest
 
 from sequence_ai.engine import serve as serving
 from sequence_ai.engine import slack
-from sequence_ai.engine.serve import App, NOT_SEATED
+from sequence_ai.engine.serve import NOT_SEATED, App
 from sequence_ai.network import msgpack_io
+
+pytest.importorskip("sequence_base")         # serve() takes each robot's stream, which needs sequence-base
 
 TIMES = {1: 0.080, 2: 0.110}                     # the stand-in's batches, in seconds
 PLAY = dict(hz=20, action_chunk_valid_len=15, action_chunk_replan_at=8)  # a 350 ms buffer, an act every 400 ms
@@ -125,6 +128,32 @@ def test_numbers_that_do_not_say_how_a_robot_plays_an_answer_are_refused_with_wh
 def test_how_a_robot_plays_an_answer_needs_an_example_to_time_the_batches_by():
     with pytest.raises(ValueError, match="pass example="):
         App(stand_in, batch=[1, 2], **PLAY)
+
+
+def test_an_answer_with_fewer_steps_than_a_robot_plays_of_each_is_warned_of_at_the_warm_up(caplog):
+    np = pytest.importorskip("numpy")
+
+    async def warmed(answer, **play):
+        app = App(lambda observation: answer, example=OBSERVATION, **play)
+        try:
+            await _ready(app)
+            return app.ready
+        finally:
+            app.close()
+
+    said = []
+    for answer, play in (({"actions": [[0.0] * 7] * 5}, dict(hz=20, action_chunk_valid_len=15)),
+                         (np.zeros((1, 7)), dict(hz=20, action_chunk_replan_at=8)),
+                         ({"actions": np.zeros((15, 7)), "value": 0.5}, dict(hz=20, action_chunk_valid_len=15))):
+        caplog.clear()
+        with caplog.at_level("WARNING", logger="sequence_ai.serve"):
+            assert _run(warmed(answer, **play))                      # ready all the same
+        said.append([r.getMessage() for r in caplog.records if r.name == "sequence_ai.serve"])
+    assert said == [["the policy answers 5 steps, fewer than the 15 it declares valid (action_chunk_valid_len): its "
+                     "robots run out of steps before the next answer comes"],
+                    ["the policy answers 1 step, fewer than the 8 it plays before asking for the next "
+                     "(action_chunk_replan_at): its robots run out of steps before the next answer comes"],
+                    []]
 
 
 def test_the_warm_up_times_each_size_as_slack_measure_does_and_ping_says_how_robots_play_and_the_seats():
@@ -340,9 +369,9 @@ def _observation():
 
 
 def test_the_policy_names_its_robot_on_each_act_and_says_its_round_trip_and_what_is_left_of_its_answer():
-    """connect(url) - the platform's own Policy - on serve(hz=...): every act names the same robot (X-Seq-Session),
-    says its round trip once it has one (X-Seq-Outside-Ms) and, from its second act on, what is left of the answer it
-    plays (X-Seq-Chunk-Left-Ms), by the hz and action_chunk_valid_len serve()'s /ping says, which its connect hands it."""
+    """connect(url) - the platform's own Policy - on serve(hz=...): every act names the same robot (X-Seq-Session), says
+    its round trip once it has one (X-Seq-Outside-Ms) and, from its second act on, what is left of the answer it plays
+    (X-Seq-Chunk-Left-Ms), by the hz and action_chunk_valid_len serve()'s /ping says, which its connect hands it."""
     import sequence_ai
 
     observation, app = _observation(), _app()

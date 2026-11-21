@@ -348,8 +348,8 @@ def test_a_batch_function_that_returns_other_than_one_output_for_each_observatio
             app.close()
 
     answers = _run(go())
-    # the first alone; the batch of the 2 that waited for it failed, so each was run again alone, and failed alone, saying
-    # why
+    # the first alone; the batch of the 2 that waited for it failed, so each was run again alone, and failed alone,
+    # saying why
     assert sizes == [1, 2, 1, 1]
     for status, _, body in answers:
         assert status == 500 and said in json.loads(body)["detail"]
@@ -431,6 +431,44 @@ def test_an_output_that_cannot_be_sent_fails_the_warm_up_not_the_first_robot():
     assert isinstance(failure, msgpack_io.MsgpackError) and "object cannot be sent as msgpack" in str(failure)
 
 
+def test_an_act_sent_twice_under_its_request_id_runs_once_and_each_is_handed_its_answer():
+    """The same act under one request id - on two of a robot's lines, or sent again after its answer was lost - runs
+    once: a copy that comes while it runs waits for its answer, and one that comes after is handed that answer. Another
+    request id runs again, and a refusal is not kept: the act sent again after it runs."""
+    calls = []
+
+    def counting(observation):
+        calls.append(int(observation["k"]))
+        time.sleep(0.05)                                  # the first still runs as the second comes
+        return len(calls)
+
+    def sent_as(rid: str) -> list:
+        return [*_ACT, ("X-Seq-Session", "robot-a"), ("X-Seq-Request-Id", rid)]
+
+    async def go():
+        app = App(counting)
+        try:
+            for episode, k in (("e-twice", 1), ("e-other", 2), ("e-refused", 3)):
+                status, _, said = await _request(app, "POST", "/observe", _observed(episode, {"k": k}),
+                                                 headers=_OBSERVE)
+                assert status == 200, said
+            first, second = await asyncio.gather(
+                _request(app, "POST", "/act", _act_call("e-twice"), headers=sent_as("rid00001")),
+                _request(app, "POST", "/act", _act_call("e-twice"), headers=sent_as("rid00001")))
+            later = await _request(app, "POST", "/act", _act_call("e-twice"), headers=sent_as("rid00001"))
+            other = await _request(app, "POST", "/act", _act_call("e-other"), headers=sent_as("rid00002"))
+            refused = await _request(app, "POST", "/act", b"not json", headers=sent_as("rid00003"))
+            again = await _request(app, "POST", "/act", _act_call("e-refused"), headers=sent_as("rid00003"))
+            return first, second, later, other, refused, again
+        finally:
+            app.close()
+
+    first, second, later, other, refused, again = _run(go())
+    assert [r[0] for r in (first, second, later, other, refused, again)] == [200, 200, 200, 200, 400, 200]
+    assert first[2] == second[2] == later[2]                       # one answer, byte for byte
+    assert calls == [1, 2, 3]                                      # each act's policy ran once
+
+
 def test_without_an_example_the_server_is_ready_at_once_has_none_to_hand_out_and_says_what_that_leaves_out(caplog):
     async def go():
         app = App(lambda o: 1)
@@ -443,7 +481,8 @@ def test_without_an_example_the_server_is_ready_at_once_has_none_to_hand_out_and
         (status, _, _), (example_status, _, body) = _run(go())
     assert status == 200 and example_status == 404 and b"serve(example=...)" in body
     assert [r.getMessage() for r in caplog.records if r.name == "sequence_ai.serve"] == [serving.NO_EXAMPLE]
-    assert "not warmed up" in serving.NO_EXAMPLE and serving.NO_EXAMPLE.endswith("add a @seq.sample method to the policy")
+    assert "not warmed up" in serving.NO_EXAMPLE
+    assert serving.NO_EXAMPLE.endswith("add a @seq.sample method to the policy")
 
 
 def test_the_lifespan_starts_the_warm_up_and_its_end_stops_the_policys_thread():
@@ -636,10 +675,11 @@ def test_a_port_held_but_not_answering_is_named_by_the_bind():
 
 @pytest.mark.parametrize("host", [None, "0.0.0.0", "127.0.0.1"])
 def test_a_port_another_server_answers_on_this_machines_loopback_is_taken_for_every_host(host):
-    """A server already answering on this machine's loopback takes the port whether serve() is given no host, a wildcard,
-    or that loopback itself: macOS lets 0.0.0.0 bind beside another program's 127.0.0.1 at the same port (and SO_REUSEADDR
-    lets a second 127.0.0.1 bind over a 0.0.0.0), and the robots on this machine would reach that other program - so
-    serve() probes the loopback and refuses the port rather than split this machine's robots between the two."""
+    """A server already answering on this machine's loopback takes the port whether serve() is given no host, a
+    wildcard, or that loopback itself: macOS lets 0.0.0.0 bind beside another program's 127.0.0.1 at the same port (and
+    SO_REUSEADDR lets a second 127.0.0.1 bind over a 0.0.0.0), and the robots on this machine would reach that other
+    program - so serve() probes the loopback and refuses the port rather than split this machine's robots between the
+    two."""
     with socket.socket() as other:
         other.bind(("127.0.0.1", 0))
         other.listen()
@@ -649,9 +689,9 @@ def test_a_port_another_server_answers_on_this_machines_loopback_is_taken_for_ev
 
 
 def test_answered_at_raises_for_a_server_there_and_returns_for_a_free_port():
-    """answered_at is what `seq serve` calls before it says it is serving, so a taken port is one worded line, not a bind
-    traceback after the "serving ..." line: it raises for a server answering on this machine (no host, wildcard, or the
-    loopback itself) and returns for a port nothing listens on."""
+    """answered_at is what `seq serve` calls before it says it is serving, so a taken port is one worded line, not a
+    bind traceback after the "serving ..." line: it raises for a server answering on this machine (no host, wildcard, or
+    the loopback itself) and returns for a port nothing listens on."""
     with socket.socket() as other:
         other.bind(("127.0.0.1", 0))
         other.listen()

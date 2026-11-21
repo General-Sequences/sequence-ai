@@ -43,15 +43,15 @@ array the server sent comes back as nested lists:
 {'state': [0.0, 1.0], 'prompt': 'pick'}
 ```
 
-### `ImportError: resizing a frame needs Pillow, which is not installed here`
+### `ImportError: resizing a frame requires Pillow, which is not installed`
 
 Pillow is a dependency of `sequence-ai`. The error appears where `frames.py` was copied into a project that has no
 Pillow: `pip install pillow`. `frames.resize_image`, `frames.encode` and `frames.decode` use Pillow, and
 `openpi.image_tools` and `openpi.patch()` through them; no other component does.
 
 ```text
-ImportError: resizing a frame needs Pillow, which is not installed here: pip install pillow
-ImportError: encoding an array or PIL image needs Pillow, and it is missing or broken here: pip install pillow. Pass an already-encoded base64 str or bytes to avoid it.
+ImportError: resizing a frame requires Pillow, which is not installed: pip install pillow
+ImportError: encoding an array or PIL image requires Pillow, which is missing or broken: pip install pillow. Pass a base64 str or encoded bytes to avoid it.
 ```
 
 The first line is what `frames.resize_image` raises, the second what `frames.encode` raises.
@@ -63,7 +63,7 @@ The first line is what `frames.resize_image` raises, the second what `frames.enc
 | `connect()` on the robot, `frames`, `window`, `ping`, `tcp_link`, `one_write` under uvicorn, `wifi_power`, `msgpack_io`, `latency_stats`, `lerobot`, every inference component, numpy arrays in observations or responses | `sequence-ai`, nothing more |
 | `seq serve`, and the quick start's server | `sequence-ai`, on Python 3.10 or later |
 | `sequence_ai.Video`, `Depth` and `Tactile`, and pictures sent as video keyframes, `connect()`'s default | `sequence-ai`, on Python 3.10 or later; on 3.9, pictures go as they are |
-| `bench/`, the measuring tool | a checkout of the repository; it is standard library only |
+| `bench/`, the measuring tool | a checkout of the repository; `client.py` and `server.py` are standard library only, `ws_bench.py` needs `websockets` and `zenoh_bench.py` `eclipse-zenoh` |
 
 Python 3.9 or later on the robot; 3.10 or later for `seq serve` and for video.
 
@@ -88,7 +88,7 @@ sequence_ai.errors.Unavailable: 127.0.0.1-8000 had no answer from http://127.0.0
 Without `wait_until_ready()`, the first act meets the same thing as it opens the robot's stream:
 
 ```text
-sequence_ai.errors.Unavailable: worker unreachable after 5 reconnect attempts: the stream to the worker did not open: the worker could not be reached (1 try in 0.0 s, the last in its TCP connect)
+sequence_ai.errors.Unavailable: worker unreachable after 5 reconnect attempts: the stream to the worker did not open: the worker could not be reached (1 try in 0.0 s, the last in its TCP connect) (hint: a robot reaches its worker on one WebSocket (wss): check that this machine's network lets it through)
 ```
 
 ## Sending and reading
@@ -103,13 +103,14 @@ GPU. `wait_until_ready()` raises it at once: asking again changes nothing.
 sequence_ai.errors.AuthError: the server at http://127.0.0.1:8000 refused this robot's ping (401) (hint: it asks for its token: connect(url, token=...))
 ```
 
-### `PolicyError: the policy raised ...`
+### `the policy raised ...`
 
 The policy raised on the observation the act was answered from. The server's log has the traceback, and the server
-goes on answering the next acts.
+goes on answering the next acts. A built-in exception, such as `KeyError`, comes back as itself; any other as
+`PolicyError`.
 
 ```text
-sequence_ai.errors.PolicyError: the policy raised KeyError: 'camera'
+KeyError: "the policy raised KeyError: 'camera' (the server's log has the traceback)"
 ```
 
 ### `PolicyError: the policy's answer cannot go back as msgpack: ...`
@@ -186,7 +187,7 @@ tested with LeRobot's own client and server. See
 
 ## On the server
 
-### `OSError: [Errno 48] port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine`
+### `error[conflict]: port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine`
 
 Another program has the port, often an earlier `seq serve` still running: `lsof -nP -iTCP:8000 -sTCP:LISTEN` names it.
 Stop it, or give the server and the robot another port:
@@ -196,10 +197,10 @@ seq serve --port 8001                                    # in the policy's folde
 python quickstart_robot.py http://127.0.0.1:8001
 ```
 
-`seq serve` (sequence-ai 0.64.1) prints, last:
+`seq serve` prints, and exits with 5:
 
 ```text
-OSError: [Errno 48] port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine (an earlier serve() still running?); stop it, or pass another port
+error[conflict]: port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine (an earlier seq serve still running?); stop it, or give seq serve another --port
 ```
 
 A uvicorn server of your own prints:
@@ -230,8 +231,8 @@ Only over a WebSocket. A server that answers one HTTP request with one response 
 
 ### `UserWarning: this machine restarts a connection's send window after each pause`
 
-Do one of the two things it names, once, on the robot. Both need root. `connect(url, check=False)` disables the
-warning without changing anything. The text below is the package's own, printed on a Mac with the Linux state
+Do one of the two things it names, once, on the robot. Both need root. `warnings.filterwarnings("ignore", "this machine restarts")`
+silences the warning without changing anything. The text below is the package's own, printed on a Mac with the Linux state
 simulated; it is issued on Linux only.
 
 ```text
@@ -301,7 +302,7 @@ cover the run's whole call; its line says whether it did.
 A graph replayed an output that is not eager mode's byte for byte, so it was taken out and the model runs as it did.
 The check is working as intended.
 
-### `optimize: whole_graph off - the policy raised with it on: ...`
+### `optimize: whole_graph off - <call>: the policy raised with it on: ...`
 
 The policy's own code refused its call once it was replayed from a graph, with its own error after the colon: code
 that reads a value back from the GPU in the middle of a run cannot be captured whole. The modules `cuda_graphs` graphs
@@ -315,8 +316,8 @@ line say `with cuda_graphs on in both`.
 
 ### `ValueError: torch_compile changes the policy's outputs: give tolerance=...`
 
-`torch_compile`, `fused_kernels`, `tensorrt` and `precision` change the outputs, so each runs only with the difference
-you accept: `seq serve --tolerance 1e-3`, or `--tolerance max_abs=0.02,cosine=0.999`.
+`torch_compile`, `fused_kernels`, `tensorrt`, `precision` and `cfg_parallel` change the outputs, so each runs only
+with the difference you accept: `seq serve --tolerance 1e-3`, or `--tolerance max_abs=0.02,cosine=0.999`.
 
 ### Every switch stayed off: no faster
 

@@ -30,8 +30,8 @@ shortens one inference with the speed-ups that keep its outputs exactly the same
 pip install sequence-ai
 ```
 
-The same package goes on the GPU and on the robot: Python 3.10 or later, on Linux or macOS. The speed-ups use your
-model's own torch (2.4 or later) or JAX.
+The same package goes on the GPU and on the robot: Python 3.10 or later, on Linux or macOS (a robot can `connect()` from
+3.9). The speed-ups use your model's own torch (2.4 or later) or JAX.
 
 ## Quick start
 
@@ -228,7 +228,7 @@ Inference layer:
 
 | Component | Result | Measured on |
 |---|---|---|
-| `cuda_graphs` | 1.54× faster (224 → 146 ms), exactly the same outputs | GR00T N1.7's diffusion transformer, one L4 |
+| `cuda_graphs` | 1.54× faster (224 → 146 ms), exactly the same outputs | GR00T N1.7's diffusion transformer, one L4, 2026-11-01 |
 | `cuda_graphs` against `torch.compile` | 1.54×, against 1.45× with different outputs (inductor) and 1.00× (cudagraphs) | the same model and GPU |
 | `cuda_graphs` | 6.7× faster (16.1 → 2.4 ms), byte for byte | a small model of many small kernels, one T4 |
 | Batching | up to 1.78× the requests per second (5.99 → 10.66) | π0.5, one L4, batch 16 |
@@ -245,7 +245,7 @@ Network layer:
 | `one_write` | 106.7 ms, not 189.7, for a response | a GET through a tunnel |
 | `sequence_ai.Video` | about 2.5 KB a frame, not 921,600 bytes as an array | a 640×480 camera, a textured background and three moving discs |
 
-[Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) lists every command, and [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench/) measures your own link.
+[Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) lists the network layer's commands, and [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench/) measures your own link.
 
 ## Repository layout
 
@@ -302,7 +302,7 @@ this README and every page of `docs/` in one file.
 ## A note on the numbers
 
 Every number in this README is given with the model, the GPU or the link it was measured on, and
-[Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) lists the command behind each one. What a network component saves depends on the
+[Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) lists the command behind each of the network layer's. What a network component saves depends on the
 link, so [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench/) measures yours before you add anything. Each module's docstring states what the component
 does in one sentence, why, and what was measured.
 
@@ -341,8 +341,8 @@ If you use SequenceLink in research, please cite it:
 
 ## License
 
-[Apache-2.0](https://github.com/General-Sequences/sequence-ai/blob/main/LICENSE). Copyright 2026 General Sequences Company. Parts of two components are adapted from another project, and the
-page `seq eval replay` serves carries others' files: [THIRD_PARTY_NOTICES.md](https://github.com/General-Sequences/sequence-ai/blob/main/THIRD_PARTY_NOTICES.md).
+[Apache-2.0](https://github.com/General-Sequences/sequence-ai/blob/main/LICENSE). Copyright 2026 General Sequences Company. Parts of five components and one example are adapted from three other
+projects: [THIRD_PARTY_NOTICES.md](https://github.com/General-Sequences/sequence-ai/blob/main/THIRD_PARTY_NOTICES.md).
 
 ---
 
@@ -362,7 +362,7 @@ pip install sequence-ai
 ```
 
 The package brings httpx, which `connect()` uses for its connection, uvicorn, which runs the server, numpy and
-zstandard for arrays, Pillow for pictures, and what the `seq` command needs (pydantic and `sequence-base`).
+zstandard for arrays, Pillow and (on Python 3.10 or later) PyAV for pictures, and what the `seq` command needs (pydantic and `sequence-base`).
 
 ## 2. Write a policy
 
@@ -393,7 +393,7 @@ class QuickstartPolicy_user:
 - **`@seq.sample`** is an episode as your robot plays it: observations and acts, in order. The server warms the model up
   on its first observation before it says it is ready; without a sample, the first robot's act is the model's first.
 - **`@seq.infer`** answers the latest observation with a chunk of actions. Its first dimension is time: row `i` is the
-  step to play `i` steps after the observation it answers.
+  step to play `i` steps after the observation it answers. Without the decorator, a method named `infer` is used.
 
 ## 3. Serve it
 
@@ -406,13 +406,16 @@ seq serve
 It prints:
 
 ```text
-serving quickstart-policy-user on port 8000: a robot connects with sequence_ai.connect("http://<this machine>:8000")
+serving quickstart-policy-user on port 8000, each robot held and seated by its time at 15 Hz: a robot connects with sequence_ai.connect("http://<this machine>:8000")
 INFO:     serving QuickstartPolicy_user.infer_user on http://0.0.0.0:8000 and http://[::]:8000 (GET /stream, POST /observe, POST /act, GET /ping, GET /example, GET /record); one observation per call
-WARNING:  no token: anyone who can reach port 8000 can run the policy (serve(token=...) or $SEQ_SERVE_TOKEN asks for one)
+INFO:     holds and seats each robot by its own time: 15 Hz, 8 valid steps, the next asked for at step 5
+WARNING:  no token: anyone who can reach port 8000 can run the policy (seq serve --token TOKEN or $SEQ_SERVE_TOKEN asks for one)
 INFO:     Started server process [68489]
 INFO:     Waiting for application startup.
+INFO:     optimize: nothing turned on - the policy holds no torch module
 INFO:     Application startup complete.
-INFO:     warm-up: one observation took 0.3 ms, then 0.3 ms
+INFO:     warm-up: one observation took 0.3 ms, then 0.3 ms at the median of 3
+INFO:     seats 1 robot 100 ms away, each robot by the round trip it reports
 INFO:     ready
 ```
 
@@ -512,8 +515,8 @@ The loop is yours, and its five steps keep the robot moving at 15 steps a second
    The connection comes back by itself; there is nothing to connect again. With the server stopped for 2 seconds in
    the middle of a 10-second run, the loop held once, at step 35, and played on when the server was back.
 
-The stand-in policy returns the mean of the frame it was sent, and the frame is all 128. On a Mac on Wi-Fi it also
-prints one warning first: Wi-Fi power saving can hold a robot's packets back, and macOS gives nothing to check it with.
+The stand-in policy returns the mean of the frame it was sent, and the frame is all 128. On Linux, with Wi-Fi power
+saving on, it also prints one warning first: power saving can hold a robot's packets back.
 
 ## 5. Check what is on
 
@@ -526,7 +529,7 @@ It prints:
 ```text
 sequence-ai check: http://127.0.0.1:8000
 
-  ok  server              sequence-ai 0.64.1, pid 68489, up 9 s, policy QuickstartPolicy_user.infer_user; it answers /ping with 200 and takes the robot's stream (x-seq-stream/3)
+  ok  server              sequence-ai 0.66.0, pid 68489, up 9 s, policy QuickstartPolicy_user.infer_user, no speed-up on; it answers /ping with 200 and takes the robot's stream (x-seq-stream/3)
   ok  round trip          0.3 ms for a ping on a kept connection (median of 10); 0.0 ms for a TCP connect
   ok  send window         macOS keeps a connection's send window through pauses
   --  BBR                 macOS has no BBR, and needs none for the window
@@ -599,14 +602,14 @@ Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/comparis
 # How do the components compare with openpi's remote inference and LeRobot's?
 
 It does not replace either one. openpi and LeRobot each ship a complete way to run a policy on a remote GPU: a server
-that loads the model, and a client on the robot that talks to it. The components here load no model. The network layer is a set
+that loads the model, and a client on the robot that talks to it. The network components here load no model. The network layer is a set
 of components for the connection underneath, and you use it in one of three ways:
 
 | You run | You keep | You add from `sequence_ai.network` |
 |---|---|---|
 | openpi | openpi's server and client, unchanged | on the robot, `openpi.keep(policy)`, and `image_tools` from `sequence_ai.network.openpi` for pictures as JPEG; on the GPU, `openpi.patch()` in its server script |
 | LeRobot's remote inference | LeRobot's server and client, unchanged | one Zenoh setting, in a file: `lerobot.keep_alive_file(path)` |
-| your own server | your model and your handler | `connect()` on the robot; `one_write`, `ping`, `compressed`, `tcp_link` on the server |
+| your own server | your model and your handler | `window` and `frames` on the robot; `one_write`, `ping`, `msgpack_io`, `tcp_link` on the server |
 
 This page compares what each one does and does not do, from source inspection: openpi at commit `215abfb`
 (2026-08-24), LeRobot 0.7.0, and this package's components. Results from tests are marked as such. No head-to-head measurement
@@ -861,7 +864,7 @@ bytes each interval, and the robot's kernel never counts the connection idle. No
 took 3.0 round trips; with the server pinging every 100 ms it took 1.1 (100 KB and 500 KB) and 1.25 (1 MB).
 
 A server that answers one HTTP request with one response cannot send anything unsolicited. There the ping comes from the
-robot: `window.Warm`, which `connect()` applies to its connection. [How do I keep a WebSocket policy server's connection
+robot: `window.Warm`, or the same pings `connect()` sends on its own stream. [How do I keep a WebSocket policy server's connection
 warm?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-keep-a-websocket-policy-servers-connection-warm.md) has the rest.
 
 `python examples/components/ping.py` printed:
@@ -1049,15 +1052,15 @@ array the server sent comes back as nested lists:
 {'state': [0.0, 1.0], 'prompt': 'pick'}
 ```
 
-### `ImportError: resizing a frame needs Pillow, which is not installed here`
+### `ImportError: resizing a frame requires Pillow, which is not installed`
 
 Pillow is a dependency of `sequence-ai`. The error appears where `frames.py` was copied into a project that has no
 Pillow: `pip install pillow`. `frames.resize_image`, `frames.encode` and `frames.decode` use Pillow, and
 `openpi.image_tools` and `openpi.patch()` through them; no other component does.
 
 ```text
-ImportError: resizing a frame needs Pillow, which is not installed here: pip install pillow
-ImportError: encoding an array or PIL image needs Pillow, and it is missing or broken here: pip install pillow. Pass an already-encoded base64 str or bytes to avoid it.
+ImportError: resizing a frame requires Pillow, which is not installed: pip install pillow
+ImportError: encoding an array or PIL image requires Pillow, which is missing or broken: pip install pillow. Pass a base64 str or encoded bytes to avoid it.
 ```
 
 The first line is what `frames.resize_image` raises, the second what `frames.encode` raises.
@@ -1069,7 +1072,7 @@ The first line is what `frames.resize_image` raises, the second what `frames.enc
 | `connect()` on the robot, `frames`, `window`, `ping`, `tcp_link`, `one_write` under uvicorn, `wifi_power`, `msgpack_io`, `latency_stats`, `lerobot`, every inference component, numpy arrays in observations or responses | `sequence-ai`, nothing more |
 | `seq serve`, and the quick start's server | `sequence-ai`, on Python 3.10 or later |
 | `sequence_ai.Video`, `Depth` and `Tactile`, and pictures sent as video keyframes, `connect()`'s default | `sequence-ai`, on Python 3.10 or later; on 3.9, pictures go as they are |
-| `bench/`, the measuring tool | a checkout of the repository; it is standard library only |
+| `bench/`, the measuring tool | a checkout of the repository; `client.py` and `server.py` are standard library only, `ws_bench.py` needs `websockets` and `zenoh_bench.py` `eclipse-zenoh` |
 
 Python 3.9 or later on the robot; 3.10 or later for `seq serve` and for video.
 
@@ -1094,7 +1097,7 @@ sequence_ai.errors.Unavailable: 127.0.0.1-8000 had no answer from http://127.0.0
 Without `wait_until_ready()`, the first act meets the same thing as it opens the robot's stream:
 
 ```text
-sequence_ai.errors.Unavailable: worker unreachable after 5 reconnect attempts: the stream to the worker did not open: the worker could not be reached (1 try in 0.0 s, the last in its TCP connect)
+sequence_ai.errors.Unavailable: worker unreachable after 5 reconnect attempts: the stream to the worker did not open: the worker could not be reached (1 try in 0.0 s, the last in its TCP connect) (hint: a robot reaches its worker on one WebSocket (wss): check that this machine's network lets it through)
 ```
 
 ## Sending and reading
@@ -1109,13 +1112,14 @@ GPU. `wait_until_ready()` raises it at once: asking again changes nothing.
 sequence_ai.errors.AuthError: the server at http://127.0.0.1:8000 refused this robot's ping (401) (hint: it asks for its token: connect(url, token=...))
 ```
 
-### `PolicyError: the policy raised ...`
+### `the policy raised ...`
 
 The policy raised on the observation the act was answered from. The server's log has the traceback, and the server
-goes on answering the next acts.
+goes on answering the next acts. A built-in exception, such as `KeyError`, comes back as itself; any other as
+`PolicyError`.
 
 ```text
-sequence_ai.errors.PolicyError: the policy raised KeyError: 'camera'
+KeyError: "the policy raised KeyError: 'camera' (the server's log has the traceback)"
 ```
 
 ### `PolicyError: the policy's answer cannot go back as msgpack: ...`
@@ -1192,7 +1196,7 @@ tested with LeRobot's own client and server. See
 
 ## On the server
 
-### `OSError: [Errno 48] port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine`
+### `error[conflict]: port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine`
 
 Another program has the port, often an earlier `seq serve` still running: `lsof -nP -iTCP:8000 -sTCP:LISTEN` names it.
 Stop it, or give the server and the robot another port:
@@ -1202,10 +1206,10 @@ seq serve --port 8001                                    # in the policy's folde
 python quickstart_robot.py http://127.0.0.1:8001
 ```
 
-`seq serve` (sequence-ai 0.64.1) prints, last:
+`seq serve` prints, and exits with 5:
 
 ```text
-OSError: [Errno 48] port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine (an earlier serve() still running?); stop it, or pass another port
+error[conflict]: port 8000 is taken: a server already answers at 127.0.0.1:8000 on this machine (an earlier seq serve still running?); stop it, or give seq serve another --port
 ```
 
 A uvicorn server of your own prints:
@@ -1236,8 +1240,8 @@ Only over a WebSocket. A server that answers one HTTP request with one response 
 
 ### `UserWarning: this machine restarts a connection's send window after each pause`
 
-Do one of the two things it names, once, on the robot. Both need root. `connect(url, check=False)` disables the
-warning without changing anything. The text below is the package's own, printed on a Mac with the Linux state
+Do one of the two things it names, once, on the robot. Both need root. `warnings.filterwarnings("ignore", "this machine restarts")`
+silences the warning without changing anything. The text below is the package's own, printed on a Mac with the Linux state
 simulated; it is issued on Linux only.
 
 ```text
@@ -1307,7 +1311,7 @@ cover the run's whole call; its line says whether it did.
 A graph replayed an output that is not eager mode's byte for byte, so it was taken out and the model runs as it did.
 The check is working as intended.
 
-### `optimize: whole_graph off - the policy raised with it on: ...`
+### `optimize: whole_graph off - <call>: the policy raised with it on: ...`
 
 The policy's own code refused its call once it was replayed from a graph, with its own error after the colon: code
 that reads a value back from the GPU in the middle of a run cannot be captured whole. The modules `cuda_graphs` graphs
@@ -1321,8 +1325,8 @@ line say `with cuda_graphs on in both`.
 
 ### `ValueError: torch_compile changes the policy's outputs: give tolerance=...`
 
-`torch_compile`, `fused_kernels`, `tensorrt` and `precision` change the outputs, so each runs only with the difference
-you accept: `seq serve --tolerance 1e-3`, or `--tolerance max_abs=0.02,cosine=0.999`.
+`torch_compile`, `fused_kernels`, `tensorrt`, `precision` and `cfg_parallel` change the outputs, so each runs only
+with the difference you accept: `seq serve --tolerance 1e-3`, or `--tolerance max_abs=0.02,cosine=0.999`.
 
 ### Every switch stayed off: no faster
 
@@ -1447,6 +1451,238 @@ nothing here is tested on Windows.
 
 Open an issue at <https://github.com/General-Sequences/sequence-ai/issues> with a minimal script that reproduces it,
 the full error text and the output of `python -c "import sys, platform; print(sys.version, platform.platform())"`.
+
+---
+
+Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-drive-a-robot-from-a-console.md
+
+# How do I drive a robot from a console, and record what I do?
+
+Run `seq teleop serve` on a machine the robot and the person can both reach, often the robot's own computer. The robot
+connects to it with `sequence_ai.connect(address)`, and a person opens the page it serves, or drives from Python with
+`sequence_ai.teleop(address)`. The server only pairs the two: pictures and commands then go directly between the browser
+and the robot over WebRTC. With `--record`, the robot writes every step to a file, and `seq data export` turns the files
+into a LeRobot v3.0 dataset.
+
+```bash
+pip install 'sequence-ai[teleop]'          # on the robot, and on a Python console (Python 3.11 or later)
+seq teleop serve --robot arm_1_user --record
+```
+
+```
+teleop for robot 'arm_1_user' at http://192.168.1.20:8200
+  the robot:    sequence_ai.connect("http://192.168.1.20:8200", token=TOKEN)
+  a console:    sequence_ai.teleop("http://192.168.1.20:8200", token=TOKEN), or the page at http://192.168.1.20:8200/
+  its Record is on: the robot writes its steps to a file on its own machine ($SEQUENCES_RECORD_DIR, else the folder it runs in)
+  TOKEN, made for this run (--token or $SEQ_TELEOP_TOKEN keeps one): ...
+  the page with it: http://192.168.1.20:8200/#token=...
+```
+
+## The robot
+
+The robot's handle has the same `observe()` and `act()` as a policy's. `act()` returns the newest chunk the person sent,
+once; while no one drives the robot, or after a stop, it returns `hold`: `{}`, unless `connect(..., hold=...)` gives
+another.
+
+```python
+import sequence_ai
+
+with sequence_ai.connect("http://192.168.1.20:8200", token=TOKEN_USER) as robot_user:
+    robot_user.wait_until_ready()
+    while running_user:
+        robot_user.observe({"wrist_user": sequence_ai.Video(frame_user), "joints_user": joints_user,
+                            "task": "pick up the cube"})
+        chunk_user = robot_user.act()          # the person's newest chunk, once; `hold` otherwise
+        play_user(chunk_user)
+    robot_user.label(True, "went well")       # how the episode went, kept with its steps
+```
+
+`robot_user.driver` is who drives now: `"model"` (no one), `"human"` or `"stopped"`.
+
+## The person
+
+The page at the server's address shows each camera, who drives, Take, Release and Stop, and how late the picture is
+(Frame: from the robot's `observe()` to the screen, p50 / p95; Round trip: browser to robot and back). Esc is Stop. One
+person drives at a time; a robot whose driver goes silent for 3 seconds stops.
+
+From Python:
+
+```python
+import sequence_ai
+
+with sequence_ai.teleop("http://192.168.1.20:8200", token=TOKEN_USER, operator="alice_user") as op_user:
+    op_user.take()
+    for step_user in op_user.stream():                # the robot's newest view, as it observed it
+        op_user.send({"actions": plan_user(step_user["observation"])})
+    op_user.release()                                 # op_user.stop() stops it where it is
+```
+
+`op_user.metrics()` has each command's one-way time and each step's time from capture to the console, p50, p95 and p99.
+
+## From a headset, a gamepad or the keys
+
+Where the browser offers WebXR's `immersive-vr`, the page shows Enter VR while you drive. In the headset, the robot's
+cameras are on screens in a row in front of you, where you looked as you went in. Two cameras named alike but for `left` and `right`, as `head_left` and
+`head_right`, are a stereo pair: one screen, each eye its own camera. The head, each hand or controller and, with hand
+tracking, each hand's 25 joints go to the robot every frame the headset draws. Out of a headset, tick Gamepad and keys,
+and a gamepad's sticks and buttons and the keys you hold go the same way. WebXR needs the page over `https://` or at
+`localhost`: on another device, put the server behind TLS (see Good to know).
+
+The console sends what it reads, as it reads it, under `inputs`. The robot turns that into its joints with
+`sequence_ai.retarget`, since only the robot knows its arm and its limits:
+
+```python
+import sequence_ai
+from sequence_ai import retarget
+
+chain_user = retarget.Chain.from_urdf("arm_user.urdf", "base_link", "gripper_link")
+box_user = ([0.1, -0.4, 0.02], [0.6, 0.4, 0.5])                   # where the tip may go, in the base, metres
+headset_user = retarget.Arm(chain_user, workspace=box_user, max_speed=0.5)
+pad_user = retarget.Twist(chain_user, workspace=box_user)
+
+with sequence_ai.connect("http://192.168.1.20:8200", token=TOKEN_USER) as robot_user:
+    robot_user.wait_until_ready()
+    while running_user:
+        robot_user.observe({"wrist_user": sequence_ai.Video(frame_user), "joints_user": q_user})
+        chunk_user = robot_user.act()
+        inputs_user = chunk_user.get("inputs") if isinstance(chunk_user, dict) else None
+        if inputs_user:
+            by_user = pad_user if "pad" in inputs_user or "keys" in inputs_user else headset_user
+            step_user = by_user.step(inputs_user, q_user, dt=1 / 30)
+            write_joints_user(step_user.q, step_user.gripper)   # gripper: 0 open .. 1 closed, None: leave it
+            robot_user.teleop_written(executed=step_user.q)
+```
+
+- **Hold to drive.** The arm follows a controller only while its grip is squeezed, or a tracked hand only while its
+  thumb touches its middle finger. Let go and the arm stays where it is; take hold again and it follows from where your
+  hand is then, without a jump. A controller put down for a hand does not jump the arm either.
+- **A hand the headset loses** holds the arm, and the arm follows again from where the hand comes back.
+- **Limits.** The tip stays inside `workspace` and moves no faster than `max_speed` (m/s), and each joint no faster than
+  `max_joint_speed`. For an arm whose joints cannot turn its tip every way, as an arm of fewer than six cannot, pass
+  `orientation=False` and the tip follows your hand's position alone.
+- **The gripper** follows a controller's trigger, or a hand's thumb-to-index pinch.
+- **A gamepad and the keys** drive while you hold the left shoulder button or Shift: the left stick or W/S and A/D
+  move the tip forward and sideways, the right stick or R/F up and down, and Q/E turn it. C closes the gripper and V opens
+  it, or the right trigger closes it as far as you press. Let go of the shoulder button or Shift and the arm stays. In a
+  headset, only the headset drives.
+- **A dexterous hand**: `retarget.Hand(config_path)` gives its joints from your hand's, with dex-retargeting
+  (`pip install dex-retargeting torch six`, a CPU torch will do) and its config for that hand.
+
+With `--record`, the robot keeps the person's inputs, as they came, beside each step it played, and the joints it said
+it wrote (`teleop_written(executed=...)`). `seq data export` puts those joints in `action` and the person's own motion
+in `human_pose`: the head's position and quaternion, then each hand's or controller's (tracked or not, position,
+quaternion, trigger, squeeze), 27 numbers a frame. `--format jsonl` keeps everything as it came, a hand's 25 joints with
+it, so another retargeting can make the actions again from the same motion.
+
+Each of these was checked with a headset emulated in Chrome (a script playing its head, a controller and a tracked
+hand), a gamepad and the keys, driving a simulated arm.
+
+## A dataset from what you recorded
+
+```bash
+seq data export ./recordings_user --out ./dataset_user            # LeRobot v3.0; --format jsonl keeps every item
+```
+
+A frame for every step the robot observed: each camera an image column (`observation.images.<key>`), every other number
+an array (`observation.<key>`), the action the person's chunk gave that step, `driver` (0 model, 1 human, 2 stopped),
+each episode's instruction as its task and its label as `next.success` on its last frame. `--fps` sets the frame rate;
+by default it is the pace the robot observed at. The LeRobot format needs pyarrow: `pip install 'sequence-ai[data]'`.
+
+## On General Sequences, one line changes
+
+The same robot script, paired through General Sequences instead, with the robot's own key and `sequence-cloud`:
+
+```python
+robot_user = sequence_ai.connect("http://192.168.1.20:8200", token=TOKEN_USER)   # your own server
+robot_user = sequence_ai.connect("teleop", api_key=ROBOT_KEY_USER)               # paired by General Sequences
+```
+
+and on the console, `sequence_ai.teleop(key=ROBOT_KEY_USER)` in place of the address. The requests, the page and the
+recording's format are the same.
+
+## When the two cannot reach each other directly
+
+Paired by General Sequences, a console and its robot connect directly, with no relay in between: pictures and commands
+take the shortest way. Where a firewall or a NAT keeps the two apart, the console says so within seconds, with
+`Unavailable` (`details.reason` `"direct_failed"`) and what kept them apart.
+
+A server of your own can take a relay of your own. Where both sides are behind a NAT that gives each peer a port of its
+own (symmetric NAT), or a network lets no UDP out, name a TURN server, and the two meet through it. Each side is handed
+a username and password for that server, good for `--turn-ttl` (12 hours by default), made with its shared secret -
+coturn's `use-auth-secret`:
+
+```bash
+turnserver --use-auth-secret --static-auth-secret="$TURN_SECRET_USER" --realm=robots_user --listening-port=3478 \
+  --denied-peer-ip=10.0.0.0-10.255.255.255 --denied-peer-ip=172.16.0.0-172.31.255.255 \
+  --denied-peer-ip=192.168.0.0-192.168.255.255
+seq teleop serve --robot arm_1_user --turn turn:turn.example_user:3478 --turn-secret "$TURN_SECRET_USER"
+```
+
+Refuse private addresses as peers, as above: a relay on the internet reaches no one's local address, and a TURN server
+whose send to one fails ends that allocation (coturn does), the connection with it. Both sides try every direct way as
+well, and `sequence_ai.teleop()` tries the relay's way only once no direct way is left that may answer, or a second on:
+a connection goes through the relay where no direct way answers (on the page, the browser's own rules choose).
+`op_user.path`, and the page's header, say which way the connection went: `"direct"` or `"relay"`; through a
+relay, `op_user.why_relay` (and `metrics()["why_relay"]`) and the page say why not straight, from each side's NAT - both
+behind symmetric NAT, a network that lets no UDP out, or a firewall between them. A console that never takes a relay,
+`sequence_ai.teleop(..., direct_only=True)` or the page's Direct only, fails with `Unavailable` (`details.reason`
+`"direct_failed"`) and says why, and its robot relays nothing either. Without `--turn` there is no relay, as on General
+Sequences, and that is how every console fails where the two cannot meet.
+
+## Many watching one robot
+
+Each console connected straight to the robot is one more upload from it. For people who only watch, serve a Media over
+QUIC relay: the robot uploads its cameras and steps once, to the relay, and the relay sends each watcher a copy.
+
+```bash
+pip install 'sequence-ai[moq]'          # on this machine, the robot and each Python watcher (Python 3.10 or later)
+seq teleop serve --robot arm_1_user --moq-port 4443
+```
+
+```python
+import sequence_ai
+
+with sequence_ai.teleop("http://192.168.1.20:8200", token=TOKEN_USER, via="moq") as watch_user:
+    for step_user in watch_user.stream():             # the robot's newest view, as a driving console reads it
+        show_user(step_user["observation"])
+```
+
+On the page, tick Watch only: it plays each camera through the relay, in a browser with WebTransport (Chrome, Edge,
+Firefox). A watcher reads `stream()`, `states()` and `metrics()` as a driving console does, and does not drive or stop the
+robot: one person drives, over WebRTC, straight to the robot, and anyone who has to stop it connects straight too. The robot encodes a camera only while someone watches it through the relay, and a
+watcher who comes in starts at a new keyframe; the first view it gets is the last one the relay held, with its own
+`t_us`. The relay takes a session only with the token its server hands out with its address, and every client checks
+the relay's certificate against the fingerprint handed out with it, so only UDP port 4443 has to be open to the
+watchers. `--moq https://relay.example_user:4443/` names a relay of your own instead (moq-relay 0.17; `http://` for one
+that made its own certificate). Watchers see the cameras and the arrays, not Depth or Tactile items.
+
+## The encoder and the transport
+
+Each camera goes to a console as H.264. The first time a camera is sent, the robot encodes a few frames with libx264
+and with each hardware encoder this machine's PyAV opens, and sends with the fastest, or with a hardware one nearly as
+fast, which spares the robot's CPU. `robot_user.teleop_metrics()["encoder"]` names the one it chose and what each one
+took. `SEQ_TELEOP_ENCODER` picks one instead: `libx264`, `h264_videotoolbox`, `h264_nvenc`, `h264_qsv`, `h264_amf`,
+`h264_mf` or `h264_v4l2m2m`. When the one it names does not open on this machine, the robot measures them all as
+before.
+
+The robot's side of each connection runs on aiortc. `SEQ_TELEOP_TRANSPORT=gstreamer` runs it on GStreamer's webrtcbin
+instead, with the H.264 encoder GStreamer finds on the machine, and x264 where it finds none. Consoles connect to it
+unchanged. There `SEQ_TELEOP_ENCODER` names a GStreamer element: `nvv4l2h264enc`, `v4l2h264enc`, `mpph264enc`,
+`vah264enc`, `vtenc_h264_hw`, `x264enc` or `openh264enc`. It needs GStreamer 1.20 or later with webrtcbin, libnice's
+elements and PyGObject:
+
+```bash
+apt install python3-gi gir1.2-gst-plugins-bad-1.0 gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-nice   # Debian, Ubuntu
+brew install gstreamer libnice-gstreamer pygobject3                                                                     # a Mac
+```
+
+In a virtualenv on a Mac, also `pip install PyGObject` and set `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib`.
+
+## Good to know
+- **One server per robot.** `--robot` names the robot a server pairs.
+- **On a network you do not trust, put the server behind TLS** (a reverse proxy that sets `X-Forwarded-Proto: https`).
+  Over plain `http://`, the token travels as it is.
+- **Python 3.11 or later** on the robot and on a Python console, as aiortc 1.16 needs.
 
 ---
 
@@ -1597,8 +1833,8 @@ keeps as `connection.latency`.
 ## Why 100 ms
 
 The robot's silence must stay shorter than its retransmission timeout, which is about its RTT plus 200 ms.
-A WebSocket server sends its next ping one interval after the last pong came back, so the robot is silent for the
-interval plus one RTT. An interval under 200 ms is therefore sufficient on a link of any length, and at 100 ms a
+A WebSocket server sends its next ping one interval after the last one (after its pong, in websockets' legacy
+implementation), so the robot is silent for the interval plus one RTT at most. An interval under 200 ms is therefore sufficient on a link of any length, and at 100 ms a
 ping that is lost still leaves the next one inside the limit.
 
 Measured on an RTT of 11.7 ms: pings 190 ms apart still kept the window (an upload after a pause took 1.18
@@ -1658,7 +1894,7 @@ Run against a stand-in server on one machine, that client sent four pings in 0.4
 ## Tested
 
 - `tests/network/test_ping.py` starts a `websockets` server with the options and checks that it pings every interval and
-  that one without them does not. It does the same under uvicorn.
+  that one without them does not; under uvicorn, that a server with the options pings every interval.
 - uvicorn 0.54 takes the options on its `auto`, `websockets-sansio` and `websockets` implementations. uvicorn 0.39's
   `websockets-sansio` sends no pings, so on an older uvicorn leave `ws` at `auto` or pass `ws="websockets"`.
 - The first three rows of the table were taken with the tool in [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench), whose server pings on
@@ -1749,8 +1985,9 @@ the policy up on its `@seq.sample` episode, checks it on those observations, and
 | `whole_graph` | `--no-whole-graph` leaves it out | yes, on a PyTorch policy | no | Replays a run's whole call into the model, its denoising loop and the noise it draws included, as one graph where it can be captured. Where it cannot, `cuda_graphs` alone. |
 | `torch_compile` | `--torch-compile` | no | yes | Compiles the modules the act spends its time in with `torch.compile`. |
 | `fused_kernels` | `--fused-kernels` | no | yes | Runs each norm, gated activation and rotary embedding in those modules as one kernel. |
-| `tensorrt` | `--tensorrt` | no | yes | Builds those modules with TensorRT, TF32 off. Install it with `pip install "sequence-ai[tensorrt]"`. |
+| `tensorrt` | `--tensorrt` | no | yes | Builds those modules with TensorRT, TF32 off. Install the torch-tensorrt made for your torch: `pip install "torch-tensorrt==2.9.*"` for torch 2.9. |
 | `precision` | `--precision fp16`, `fp32` or `fp8` | no: the model's own dtype | yes | `fp16` or `fp32` runs those modules in that dtype. `fp8` runs their linear layers in 8-bit floating point, on a GPU of compute capability 8.9 or later (L4, H100). |
+| `cfg_parallel` | `--cfg-parallel`, with `seq serve` started as two processes: `torchrun --nproc-per-node 2 -m seq serve ...` | no | yes | Splits a model's classifier-free guidance between the two processes, each on a GPU of one type: each call of a module the policy makes with the guidance's two halves in one batch runs one half in each process, and the two come back as one answer. |
 
 ## A switch that changes the outputs needs a tolerance
 
@@ -1780,13 +2017,13 @@ A switch that changes the outputs, turned on without a tolerance, is refused bef
 - **The graphs last.** The switches that change the outputs are tried first, and `cuda_graphs` and `whole_graph` are
   then captured from what runs and compared exactly with it.
 
-With fewer than 32 observations in the episode, each is run with several random states; an episode of 32 or more of
-your robot's own observations checks more.
+With fewer than 8 observations in the episode, each is run again with other random states until there are 8 runs;
+an episode of 32 or more of your robot's own observations checks more.
 
 ## Reading what it kept
 
-`seq serve` prints one line for each switch as it is decided. On GR00T N1.7 (the gr00t-droid template) on an L4,
-`cuda_graphs` said:
+`seq serve` prints one line for each switch as it is decided. On GR00T N1.7 (the gr00t-droid template, built as
+`seq serve` builds it) on an L4, `cuda_graphs` said, its times the median of the acts it timed in turns:
 
 ```text
 optimize: cuda_graphs on - infer._policy.model.action_head.model (4 calls a run), infer._policy.model.action_head.action_encoder (4 calls a run), infer._policy.model.action_head.action_decoder (4 calls a run): the same outputs, bit for bit, on 8 runs; act 149.9 → 117.5 ms
@@ -1809,6 +2046,7 @@ A policy whose model `jax.jit` compiles gets each switch's counterpart in XLA:
 | `precision` | Casts the parameters its jitted functions are given to `fp16` or `fp32`. |
 | `torch_compile`, `fused_kernels` | Nothing to add: XLA compiles each jitted function whole and fuses its kernels already. |
 | `tensorrt` | No counterpart: TensorRT builds torch modules. |
+| `cfg_parallel` | No counterpart: it splits the calls of torch modules. |
 
 XLA already puts most of a jitted function's work in command buffers, so on a JAX policy these two are tried only when
 you turn them on: `seq serve --cuda-graphs --whole-graph`. The checks are the same. The random key the policy holds is
@@ -1821,6 +2059,8 @@ set from each run's seed, so two runs of one observation draw the same noise.
   exactly, so `cuda_graphs` and `whole_graph` stay off and their lines say which output changed.
 - A module that is called once per run, or whose shapes change within a run, has no graph to replay many times;
   `whole_graph` can still cover the run.
+- `cfg_parallel` needs `seq serve` started as two processes, and a module the policy calls with the guidance's two
+  halves in one even batch: a policy that runs its guidance as two calls has nothing to split.
 - `fp8` needs a GPU of compute capability 8.9 or later. A linear layer whose output moves more than 5% in fp8 keeps
   its own precision, and the choice is kept in `~/.cache/sequence-ai/fp8` for the next start.
 
@@ -1836,12 +2076,12 @@ Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i
 Replay the module your policy calls many times per run, its denoiser, from CUDA graphs captured from its own eager
 kernels. `seq serve` does that by default while it warms the policy up: it finds the modules, captures them, and keeps
 the graphs only when the outputs on its `@seq.sample` episode equal eager mode's byte for byte and acts are at least
-10% faster. On GR00T N1.7 on an L4, graphing its diffusion transformer reduced a run from 224 ms to 146 ms
-(1.54 times faster) with exactly the same actions. It gains nothing on a model that already fuses and graphs its
+10% faster. On GR00T N1.7 on an L4, `seq serve` graphed its diffusion transformer and the action encoder and
+decoder beside it, and acts went from 149.9 ms to 117.5 ms (1.28 times faster) with exactly the same actions. It gains nothing on a model that already fuses and graphs its
 kernels.
 
 ```bash
-seq serve my_policy_user     # its warm-up prints a line for each switch: on or off, the modules, why
+seq serve my_policy_user     # its warm-up prints a line for each switch it tries: on or off, the modules, why
 ```
 
 Nothing else in your code changes. Each graphed module stays where it is in your model, the same object of the same
@@ -1868,7 +2108,8 @@ model and GPU:
 | `torch.compile`, inductor | 1.45× | changed: 0.0051 apart on average |
 | `cuda_graphs` | 1.54× (224 ms to 146 ms) | exactly the same, on inputs it was not captured on |
 
-GR00T N1.7 on one L4, its DiT captured.
+GR00T N1.7 on one L4, 2026-11-01: its DiT alone captured by hand, each approach timed against eager mode in the same
+process.
 
 `seq serve` verifies the equality instead of assuming it. It runs the `@seq.sample` episode's observations with fixed
 random states, in eager mode and then with the graphs, and keeps them only if every output is equal byte for byte. After
@@ -2211,7 +2452,7 @@ answer_user = policy_user.act()
   weights are in.
 - It downloads a template's weights with your key into `~/.cache/sequence-ai/weights/<template>/<version>`, each file
   checked by its sha256. A second run downloads nothing; `seq weights get <template>` downloads them alone.
-- It serves the class's `@seq.infer` with `sequence_ai.serve`: a `@seq.concurrent` policy's acts in its listed batch
+- It serves the class's `@seq.infer`: a `@seq.concurrent` policy's acts in its listed batch
   sizes, stacked into one batch as on the platform.
 - It runs the class's `@seq.shutdown` when you stop it.
 
@@ -2257,8 +2498,8 @@ print(policy_user.act())                                       # {'delta': [0.1]
 `--weights <folder>` reads a folder instead of downloading, such as your own fine-tune of the template's checkpoint. A
 policy whose weights come in named parts takes `--weights <part>=<folder>` for each.
 
-`seq serve` serves a policy whose `@seq.infer` takes the observation. A policy that keeps each episode's state
-(`@seq.observe`) runs as a deployment, which hands it each robot's episode.
+`seq serve` serves a policy whose `@seq.infer` takes the observation, and one that keeps each episode's state
+(`@seq.observe`) as a deployment does, handing it each robot's episode.
 
 ---
 
@@ -2459,7 +2700,7 @@ side by side.
 
 ## If something fails
 
-- `TypeError: this client keeps no WebSocket connection at _ws`: pass the `WebsocketClientPolicy` itself to
+- ``TypeError: this client keeps no WebSocket connection at `_ws` ``: pass the `WebsocketClientPolicy` itself to
   `keep()`, not an `ActionChunkBroker` wrapped around it. Keep the broker for `infer()`.
 - `ConnectionClosedError: sent 1011 (internal error) keepalive ping timeout` on the robot's first `infer()`: openpi's
   server answers no ping while its first inference compiles the model. `openpi.keep(policy)` keeps the connection
@@ -2516,8 +2757,9 @@ not have is refused with the names it has, before anything is opened.
   the observations before it, and they are there by whichever line was quicker.
 - **The first answer is used.** The others are read when they come, and `stats()["lines"]` says how much later. An act
   fails only when every line has failed.
-- **The policy runs once.** The copies of an act carry one request id, `X-Seq-Request-Id`, and the server runs the act
-  once and gives each copy that answer; an observation that comes by both lines is kept once.
+- **The policy runs once on a hosted worker.** The copies of an act carry one request id, `X-Seq-Request-Id`, and a
+  hosted worker runs the act once and gives each copy that answer; `seq serve` runs it for each copy. An observation that
+  comes by both lines is kept once.
 - **A line that stops answering collects no queue.** A line still carrying the act before is not given the next one.
 - **A line that drops opens again by itself.** The other lines carry everything meanwhile; the robot's stream ends only
   when every line has.
@@ -2590,8 +2832,8 @@ policy_user.observe({"image": frame_user, "state": state_user})
 actions_user = policy_user.act()["actions"]
 ```
 
-Both sides' defaults are on: the robot sends pictures as JPEG and compresses large arrays where that saves time, keeps
-its one connection warm with pings, and waits longer for the first answer; the server runs the policy on a thread of
+Both sides' defaults are on: the robot sends each picture as a video keyframe and compresses large arrays where that
+saves time, and keeps its one connection warm with pings; the server runs the policy on a thread of
 its own, answers pings at once, warms the policy up on its sample, and sends torch and JAX outputs back as numpy arrays.
 [What is on by default, and how do I turn each part off?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/what-is-on-by-default.md) lists every part with its switch,
 and `python -m sequence_ai.check http://YOUR_GPU:8000` says which are on between your robot and your server.
@@ -2685,13 +2927,14 @@ A component saves time only on a link that has the cost it removes. Measure befo
 
 | On your link | Add | Measured |
 |---|---|---|
-| A short round-trip time (round-trip time (RTT), about 21 ms) and pauses between requests | `connect()`, or `window` on your own client | 40 of 40 requests took one extra round trip without BBR, none with it |
-| A longer RTT (about 101 or 241 ms), no loss | nothing for the pauses | 0 or 1 of 40 requests took an extra round trip with the default settings |
+| A short round-trip time (RTT, about 21 ms) and pauses between requests | `connect()`, or `window` on your own client | 40 of 40 requests took one extra round trip without BBR, none with it |
+| A long RTT (about 241 ms), no loss | nothing for the pauses | 0 or 1 of 40 requests took an extra round trip with the default settings |
 | A tunnel or proxy in front of the server | `one_write` | GET p50 189.7 ms with headers and body written apart, 106.7 ms in one write |
-| Large raw arrays on a slow uplink | compression, on by default with `seq serve` | 172,800-byte frames came out about 1.9 times smaller for 0.37 ms |
+| Large raw arrays on a slow uplink | compression, on by default in `connect()` | 172,800-byte DROID camera frames came out about 1.9 times smaller by zstd-1, in 0.37 ms |
 | A new connection for each call | keep one open, as `connect()` does | 305.9 ms per call with a new connection, 121.0 ms reusing one |
 
-The conditions behind each row are in the [README](https://github.com/General-Sequences/sequence-ai/blob/main/README.md#results).
+The conditions behind the other rows are in [Components](https://github.com/General-Sequences/sequence-ai/blob/main/docs/components.md) and [Why does my robot's upload get slow
+after a pause?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/why-does-my-robots-upload-get-slow-after-a-pause.md).
 [How do I measure the link between my robot and my GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-measure-the-link-between-my-robot-and-my-gpu.md)
 shows how to get the same numbers for your own link.
 
@@ -2701,15 +2944,15 @@ shows how to get the same numbers for your own link.
   Start it with one, `SEQ_SERVE_TOKEN=... seq serve`, and connect with `sequence_ai.connect(url, token="...")`; open
   the port only to your robot's address as well.
 - **The first answer.** A model compiled on its first inference takes tens of seconds. `@seq.sample` runs it before
-  the server says it is ready, `wait_until_ready()` waits for that on the robot, and `connect()` gives the first act
-  120 s in any case.
+  the server says it is ready, `wait_until_ready()` waits for that on the robot, and an act waits 30 s for its answer
+  unless `connect(timeout_s=...)` says longer.
 - **Several robots on one GPU.** `@seq.concurrent(sizes=[1, 2, 4, 8])`, above. One replica of a model per GPU:
   [How many robots can one GPU serve?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-many-robots-can-one-gpu-serve.md)
 - **No GPU near the robot.** [How do I get a GPU near my robot?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-get-a-gpu-near-my-robot.md)
 
 ## Plans and episodes
 
-`@seq.plan`, `@seq.observe` and `@seq.on_episode` run on `seq serve` as on a deployment: each robot's episodes are its
+`@seq.plan` (one that declares no `models=`), `@seq.observe` and `@seq.on_episode` run on `seq serve` as on a deployment: each robot's episodes are its
 own, `on_episode` gets `phase="end"` when one ends, and a plan never holds up an act.
 
 ## See also
@@ -2785,7 +3028,7 @@ policy_user.observe({"image": frame_user, "prompt": prompt_user})  # frame_user:
 chunk_user = policy_user.act()["actions"]
 ```
 
-`chunk_user` is the 4 x 7 chunk the policy returned. The picture goes as JPEG and comes back to the policy as the
+`chunk_user` is the 4 x 7 chunk the policy returned. The picture goes as a video keyframe and comes back to the policy as the
 array it reads, as [What is on by default](https://github.com/General-Sequences/sequence-ai/blob/main/docs/what-is-on-by-default.md) says.
 
 ## Return an action chunk
@@ -2913,8 +3156,8 @@ fast_user = sequence_ai.engine.optimize(infer_user, examples_user)    # 32 or mo
 print(fast_user.report["on"])                                          # for example ["cuda_graphs", "whole_graph"]
 ```
 
-`serve(infer_user, ...)` runs the same during its warm-up. Measured: GR00T N1.7 on an L4, its DiT captured, 224 ms to
-146 ms per run, with exactly the same outputs on inputs it was not captured on. The report says which modules were
+`serve(infer_user, ...)` runs the same during its warm-up. Measured with `seq serve`: GR00T N1.7 on an L4, its diffusion
+transformer and the action encoder and decoder graphed, acts from 149.9 ms to 117.5 ms, with exactly the same outputs. The report says which modules were
 graphed and why any switch stayed off, and
 [`examples/check_on_a_gpu.py`](https://github.com/General-Sequences/sequence-ai/blob/main/examples/check_on_a_gpu.py) compares every output with eager mode's on your GPU. [How do I make a PyTorch robot policy faster without changing its
 outputs?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md)
@@ -3029,8 +3272,10 @@ prints that case with no model and no GPU.
   a request that arrives as another batch runs waits for it, and is in time or not depending on how far apart the
   robots' requests fall. No formula has that, so `slack` runs 2, 3 and more robots on a simulated clock, as its
   server loop would serve them, from starts spread evenly over every way their requests can fall in a cycle (64 for
-  two robots, 128 for more). A number of robots is within capacity when at least 95% of their responses are back
-  before their robot's buffer runs out, each start counting the same.
+  two robots, 128 for more). A number of robots is within capacity when no response is late in any start: each robot's
+  loop starts again from the moment it is called, so a fleet can spend a whole episode in any of the ways its requests
+  can fall. `worst=False` asks instead for 95% of the responses back before their robot's buffer runs out, each start
+  counting the same.
 - **Load.** In each of those starts the robots' batches may fill at most 0.9 of a cycle, the time between one robot's
   requests. Past that, responses queue behind each other however the requests are batched.
 
@@ -3094,7 +3339,8 @@ trips with the defaults, and one with any of the components that keep the connec
 plain TCP, over a WebSocket and over Zenoh, at round-trip times (RTTs) from 11 to 101 ms. At 242 ms the pause cost
 nothing; under 1% packet loss, BBR kept the window.
 
-Everything on this page was measured on 2026-11-15 with [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench), as released. It is one pair of machines
+The TCP, WebSocket and Zenoh sections were measured on 2026-11-15 with [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench), as released; the openpi
+sections with openpi's own server and client. It is one pair of machines
 on one night. **It is not a promise for your link:**
 [measure yours](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-measure-the-link-between-my-robot-and-my-gpu.md).
 
@@ -3328,8 +3574,8 @@ Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/parts-fo
 # Parts for a server you already run
 
 Each part below is one file that goes into a policy server you already run, or next to a client you already use,
-without changing the rest of it. A policy written as a class and served with `seq serve` has them on already: the
-[Quickstart](https://github.com/General-Sequences/sequence-ai/blob/main/docs/quickstart.md) starts there. These are for the code you keep.
+without changing the rest of it. A policy written as a class and served with `seq serve` has all but `replicas` on already, its robot sending the
+pings: the [Quickstart](https://github.com/General-Sequences/sequence-ai/blob/main/docs/quickstart.md) starts there. These are for the code you keep.
 
 ## On the GPU
 
@@ -3344,11 +3590,11 @@ action_user = await batcher_user(observation_user)               # in each reque
 
 | Part | What it does | Read |
 |---|---|---|
-| `optimize` | Makes a policy faster on its GPU: each speed-up kept only where its outputs on your observations stay exactly the same | [How do I make a policy faster without changing its outputs, and what does each switch change?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-make-a-policy-faster-without-changing-its-outputs.md) |
+| `optimize` | Makes a policy faster on its GPU: each speed-up kept only where its outputs on your observations stay the same, bit for bit unless you give a tolerance | [How do I make a policy faster without changing its outputs, and what does each switch change?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-make-a-policy-faster-without-changing-its-outputs.md) |
 | `batcher` | Several robots' requests in one forward pass, in the batch sizes the model lists | [Quickstart: batching and replicas](https://github.com/General-Sequences/sequence-ai/blob/main/docs/quickstart-inference.md), [How many robots can one GPU serve?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-many-robots-can-one-gpu-serve.md) |
 | `slack` | How long each request may wait, from the slack its robot's action chunk leaves | [`slack`](https://github.com/General-Sequences/sequence-ai/blob/main/docs/slack.md) |
-| `replicas` | One process per GPU, each running one call at a time; a process that dies is replaced | [Should I run two replicas of a policy on one GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/should-i-run-two-replicas-of-a-policy-on-one-gpu.md) |
-| `one_write`, `ping` | Each response in one write, and a ping answered at once, in a uvicorn or a WebSocket server | [What does each network component do?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/components.md) |
+| `replicas` | One process per replica, on the GPU you give it, each running one call at a time; a process that dies is replaced | [Should I run two replicas of a policy on one GPU?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/should-i-run-two-replicas-of-a-policy-on-one-gpu.md) |
+| `one_write`, `ping` | Each response in one write, and a ping to each robot every 100 ms, in a uvicorn or a WebSocket server | [What does each network component do?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/components.md) |
 
 [How do I use the inference components with openpi, LeRobot or GR00T?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md)
 says which of them applies to which framework.
@@ -3451,11 +3697,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install sequence-ai
 ```
 
-The last line it prints:
-
-```text
-Successfully installed annotated-types-0.8.0 anyio-4.16.0 certifi-2026.10.23 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 idna-3.20 pillow-13.0.0 pydantic-2.14.3 pydantic-core-2.50.4 sequence-ai-0.62.0 sequence-base-0.8.12 typing-extensions-4.16.0 typing-inspection-0.4.5
-```
+Its last line names each package it installed, `sequence-ai` and `sequence-base` among them.
 
 The inference components import only the standard library. `optimize` operates on a torch model, or a JAX one, and
 uses the torch or JAX your model already has.
@@ -3673,7 +3915,7 @@ the margin before that.
 - **A request's deadline is its buffer, less its robot's RTT, less 50 ms.** The RTT is what the
   robot reports with its request (`outside_ms`, an integer number of ms from 0 to 5000), and 100 ms for a robot that
   reports nothing. A robot that sent its request late reports the playback time it has left (`left_ms`), and that
-  value is used as its deadline.
+  value is used in place of its buffer.
 - **Batch times are measured, not estimated.** `measure` runs each listed size once untimed, then three times. `Table`
   keeps the latest 64 forward passes of each size: their p95 is what a batch is taken to last, for waiting decisions
   and on the clock, and their p50 is what it counts for in the load.
@@ -3691,7 +3933,7 @@ the margin before that.
   episode in any of the ways its requests can fall. `worst=False` asks instead for 95% of the responses back in time
   over the starts, each start counting the same. The first number
   that fails ends the count: robots are admitted one at a time, so a replica reaches a number of robots through
-  every smaller one. The clock rounds each batch time up by 3% at most and each RTT up to 10 ms, and keeps each
+  every smaller one. The clock rounds each batch time up by at most 1/32 (about 3%) and each RTT up to 10 ms, and keeps each
   verdict by them: a server's timings move by a few ms from one request to the next, and rounded they ask a question
   already answered.
 - **Each robot by its own RTT.** Robots are admitted nearest first, and robots that fit the same batch size are batched
@@ -3708,17 +3950,27 @@ the margin before that.
   largest listed size its deadline allows, and only where the requests behind it still meet theirs.
 - **A far robot's batch waits one control step at most** for a near robot's request that is due as it would run.
   Dispatched immediately, it would make the near request wait behind it for a full batch time.
-- **A robot that sends nothing for four of its periods is dropped from the schedule**: no batch waits for it.
+- **A robot that sends nothing for four times its chunk's length (N / hz, or its period where that is longer) is dropped
+  from the schedule**: no batch waits for it.
 - **Where a policy sets `max_wait_s`** (up to 60 s), that wait replaces the buffer, for capacity and for the batching
   delay. Its robot may run out of actions, and waits.
 
 ## In a server
 
-`serve()` runs this loop for you. Tell it how a robot plays an answer, and give it an example to time the batches:
+`seq serve` runs this loop for you, in the policy's folder. Declare how a robot plays an answer, list the batch sizes,
+and give the policy a sample to time the batches on:
 
 ```python
-sequence_ai.serve(policy_on_a_list_user, batch=[1, 2, 4], example=observation_user,
-                  hz=20, action_chunk_valid_len=15, action_chunk_replan_at=8)
+@seq.policy(hz=20, action_chunk_valid_len=15, action_chunk_replan_at=8)
+class BatchedPolicy_user:
+    @seq.sample
+    def sample_user(self):
+        return [("observe", observation_user), ("act",)]
+
+    @seq.concurrent(sizes=[1, 2, 4])
+    @seq.infer
+    def infer_user(self, observations_user):
+        return model_on_a_batch_user(observations_user)
 ```
 
 Each robot's `connect()` then names it on every request and reports its round trip and what is left of its chunk.
@@ -3779,8 +4031,8 @@ serving stack it was taken from.
   (a 467 ms buffer; batches of 1, 2 and 3 in 195, 312 and 429 ms) `per_replica` computed a capacity of 2: 2 robots
   had no late response, 3 had 21% and 26%, and 4 had 99%. At 20 Hz (350 ms) it computed 1, and 2 robots had 40% and
   90% late. The server admitted every robot, so the cells above the capacity show what `seat()` prevents.
-  `per_replica` then computed the load by a formula. On a clock, as now, those capacities are the same, for robots
-  20, 50 or 100 ms away.
+  `per_replica` then computed the load by a formula. On a clock, as now, those capacities are the same for robots
+  20 or 50 ms away; 100 ms away, the 15 Hz capacity is 1 (2 with `worst=False`).
 - **The capacity, on three models.** One L4, simulated robots of a 15 Hz policy 20 ms away, 60 s per cell, with the load
   computed by that formula. For π0.5 and GR00T N1.6 it computed 2, and 2 robots had no late response (0.4% in one cell
   of eight). For SmolVLA (batches of 1, 2, 4 and 8 in 256, 273, 303 and 377 ms) it computed 8, and 4 robots had 95% and
@@ -3872,13 +4124,13 @@ Sequences serves with. It has not been compared with either.
 | `CLOCK_CYCLES`, `CLOCK_WARM` | 48, 8 | the cycles a start is run for on the clock, and how many of the first are not counted |
 | `CLOCK_STARTS` | 128 | the starts a number of robots is run from on the clock; half as many for two robots |
 | `IN_TIME_MIN` | 0.95 | with `worst=False`, the share of a fleet's responses that must be back before their buffer runs out, over the starts; by default none may be late in any start |
-| `CLOCK_BITS`, `CLOCK_RTT_MS` | 6, 10 | the clock's resolution: a batch time rounded up to 6 significant bits (3% at most), an RTT up to 10 ms |
+| `CLOCK_BITS`, `CLOCK_RTT_MS` | 6, 10 | the clock's resolution: a batch time rounded up to 6 significant bits (at most 1/32, about 3%), an RTT up to 10 ms |
 | `WINDOW` | 64 | the runs kept for each batch size |
 | `RUNS` | 3 | the timed runs of each size, after one untimed |
 | `SERVED_MIN` | 8 | the answered requests after which a size is timed by what its batches took |
 | `OUTSIDE_MAX_MS`, `LEFT_MAX_MS` | 5000, 600000 | the largest values a robot may report for its RTT, and for the playback time it has left |
 | `WAIT_MAX_S` | 60 | the longest `max_wait_s` |
-| `GONE_PERIODS` | 4 | the periods of silence after which a robot is dropped from the schedule |
+| `GONE_PERIODS` | 4 | the chunk lengths (N / hz, or periods where longer) of silence after which a robot is dropped from the schedule |
 | `PERIOD_WEIGHT` | 0.2 | the weight of a new gap between a robot's requests in its estimated period |
 
 ---
@@ -3904,12 +4156,13 @@ policy_user = sequence_ai.connect("http://YOUR_GPU:8000")  # on the robot
 |---|---|---|
 | The policy's thread | The policy runs on one thread of its own, one call at a time. Acts that arrive meanwhile wait their turn, in order; pings and uploads are not held behind it | always on |
 | Batching | Off: one observation per call | `@seq.concurrent(sizes=[1, 2, 4, 8])` on `@seq.infer`: it takes the observations waiting, stacked, and returns a row for each |
+| Seats | With `hz` on `@seq.policy`: a robot is let in at its first act only where every robot let in is still answered in time; another robot's act is refused `503`, saying why | `@seq.policy` without `hz`: off |
 | Addresses | Every address of the machine: `0.0.0.0`, and `::` where it has IPv6 | `seq serve --host 127.0.0.1`: this machine only |
 | The robot's stream | Each robot's observations and acts on one WebSocket (`GET /stream`), each message answered as a request; `X-Seq-Act-Formats` names it on every response | always on |
 | Observations | Kept by episode, in order; a robot's `Video`, `Depth` and `Tactile` items turned back into the arrays they were. One that did not come is asked for again, and the act waits for it | always on |
-| Ping | `GET /ping` is answered at once: `503` with `Retry-After` until the warm-up is done, then `200` with what the server is, as JSON (`server`, `version`, `up_s`, `pid`, `policy`) | always on |
+| Ping | `GET /ping` is answered at once: `503` with `Retry-After` until the warm-up is done, then `200` with what the server is, as JSON (`server`, `version`, `up_s`, `pid`, `policy`, `optimized`) | always on |
 | Identity | `X-Seq-Server: sequence-ai/<version>` on every response, so a robot can tell `seq serve` from another program at its address | always on |
-| Warm-up | With `@seq.sample`, the policy runs on its first observation twice at each batch size before `/ping` says ready; `GET /example` hands it out | leave out `@seq.sample` |
+| Warm-up | With `@seq.sample`, the policy runs on its first observation twice at each batch size, four times when it declares `hz`, before `/ping` says ready; `GET /example` hands it out | leave out `@seq.sample` |
 | Inputs | The observation as the robot made it, numpy arrays as arrays, each the policy's own to write into | always on |
 | Outputs | torch tensors and JAX arrays are sent as numpy arrays (bfloat16 as float32), copied on the policy's thread | always on |
 | One write | Each response leaves the server in one write | always on |
@@ -3949,7 +4202,7 @@ Against the [Quickstart](https://github.com/General-Sequences/sequence-ai/blob/m
 ```text
 sequence-ai check: http://127.0.0.1:8000
 
-  ok  server              sequence-ai 0.64.1, pid 68489, up 9 s, policy QuickstartPolicy_user.infer_user; it answers /ping with 200 and takes the robot's stream (x-seq-stream/3)
+  ok  server              sequence-ai 0.66.0, pid 68489, up 9 s, policy QuickstartPolicy_user.infer_user, no speed-up on; it answers /ping with 200 and takes the robot's stream (x-seq-stream/3)
   ok  round trip          0.3 ms for a ping on a kept connection (median of 10); 0.0 ms for a TCP connect
   ok  send window         macOS keeps a connection's send window through pauses
   --  BBR                 macOS has no BBR, and needs none for the window
@@ -4010,11 +4263,14 @@ stopping machines, accounts and billing, and building, serving and scoring a hos
 Everything a robot and its GPU run, and what a policy is written with:
 
 - **On the GPU:** `seq serve` and the `@seq.policy` decorators a policy is written with, and the inference components
-  the server uses, which a server of your own can use as well: `cuda_graphs`, `batcher`, `replicas` and `slack` (`sequence_ai/engine/`).
+  the server uses, which a server of your own can use as well: `cuda_graphs`, `batcher` and `slack`, with `replicas` beside them (`sequence_ai/engine/`).
 - **On the robot, and between the two:** `sequence_ai.connect()` and the network components on each end
   (`sequence_ai/network/`), with `openpi` and `lerobot` for the clients and servers of those projects.
 - **A policy and an official template, on your own GPU:** the decorators a policy is written with, and `seq init`,
   `seq serve` and `seq weights get`, which run an official template where you choose.
+- **Teleoperation:** the robot's side, the console - its page and `sequence_ai.teleop()` - the direct connection
+  between them, and `seq teleop serve`, which pairs the two on a machine of your own; with what a robot records,
+  `seq data export`, which makes a LeRobot dataset of it.
 - **Language models:** `sequence_ai.chat()`, with your own key or at a server of your own.
 - **Checking and measuring:** `python -m sequence_ai.check`, which says which defaults are on between a robot and its
   server, and `bench/`, which measures what a pause, a ping and a camera stream cost on your link.
@@ -4028,8 +4284,9 @@ What decides where a policy runs, and what it costs:
 
 - **A GPU near your robot.** The closest GPU available to a place you give. How it is chosen is the service's.
 - **Machines.** Starting, stopping and billing the GPUs you rent or deploy on.
-- **Hosted deployments.** The same policy folder built and served for you, scaled, with benchmarks and evals, and a
-  robot driven with it in teleoperation.
+- **Hosted deployments.** The same policy folder built and served for you, scaled, with benchmarks and evals.
+- **Pairing by a robot's key.** A console paired with a robot through the service, by the robot's own key, and who
+  drove it in your account's audit trail - the same robot code and the same console as `seq teleop serve`.
 - **Your account.** Keys, limits and billing.
 
 The service's client is not in this package: `sequence-cloud` is its own package, and lets `connect()` take a
@@ -4144,7 +4401,7 @@ Three machines of one cloud provider, RTTs of 11.7 and 69.2 ms, 20 samples per c
 |---|---|---|
 | BBR on the connection: `window.socket_options()`, `window.keep(sock)` | Linux with the `tcp_bbr` module loaded | yes |
 | `net.ipv4.tcp_slow_start_after_idle=0` | root on the robot | yes |
-| A ping from the robot while idle: `window.Warm`, which `connect()` uses | nothing | no |
+| A ping from the robot while idle: `window.Warm`, or `connect()`'s own | nothing | no |
 | A ping from the server: [`ping`](https://github.com/General-Sequences/sequence-ai/blob/main/docs/how-do-i-keep-a-websocket-policy-servers-connection-warm.md) | a WebSocket server | no |
 
 A ping keeps the connection from counting as idle. It does not stop Linux from shrinking a window that the traffic
