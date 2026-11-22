@@ -260,12 +260,13 @@ def serve(folder: str | os.PathLike, name: str | None = None, *, host: str | Non
           weights: list[str] | None = None, token: str | None = None, api_key: str | None = None,
           base_url: str | None = None, cuda_graphs: bool | None = None, whole_graph: bool | None = None,
           torch_compile: bool = False, fused_kernels: bool = False, tensorrt: bool = False,
-          precision: str | None = None, tolerance: Any = None, cfg_parallel: bool = False) -> int:
+          precision: str | None = None, tolerance: Any = None, cfg_parallel: bool = False,
+          pipeline_parallel: bool = False) -> int:
     """`seq serve`: build the folder's policy and serve it until stopped (Ctrl-C), then run its @seq.shutdown. Before it
     says it is ready, the speed-ups that keep its answers the same are tried on its sample episode's observations and
     kept where they are faster (sequence_ai.engine.optimize); `cuda_graphs`, `whole_graph` False leave one untried.
-    torch_compile, fused_kernels, tensorrt, precision and cfg_parallel (two processes, torchrun --nproc-per-node 2)
-    change the answers, and are tried only with `tolerance`."""
+    torch_compile, fused_kernels, tensorrt, precision, cfg_parallel (two processes, torchrun --nproc-per-node 2) and
+    pipeline_parallel (two or more) change the answers, and are tried only with `tolerance`."""
     from sequence_ai.engine.optimize import check_switches
     from sequence_ai.engine import ranks as _ranks
     from sequence_ai.engine.serve import answered_at, serve as engine_serve
@@ -273,7 +274,7 @@ def serve(folder: str | os.PathLike, name: str | None = None, *, host: str | Non
 
     check_switches(cuda_graphs=cuda_graphs, whole_graph=whole_graph, torch_compile=torch_compile,
                    fused_kernels=fused_kernels, tensorrt=tensorrt, precision=precision, tolerance=tolerance,
-                   cfg_parallel=cfg_parallel)
+                   cfg_parallel=cfg_parallel, pipeline_parallel=pipeline_parallel)
 
 
 
@@ -302,8 +303,8 @@ def serve(folder: str | os.PathLike, name: str | None = None, *, host: str | Non
         engine_serve(served.call, host=host, port=port, batch=served.batch, example=served.example, token=token,
                      examples=served.examples, cuda_graphs=cuda_graphs, whole_graph=whole_graph,
                      torch_compile=torch_compile, fused_kernels=fused_kernels, tensorrt=tensorrt,
-                     precision=precision, tolerance=tolerance, cfg_parallel=cfg_parallel, copy=served.copy,
-                     **plays)
+                     precision=precision, tolerance=tolerance, cfg_parallel=cfg_parallel,
+                     pipeline_parallel=pipeline_parallel, copy=served.copy, **plays)
     except OSError as failed:
         if failed.errno != errno.EADDRINUSE:
             raise

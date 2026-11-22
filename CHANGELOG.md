@@ -3,6 +3,21 @@
 What changed in each release of SequenceLink's package, `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
+## 0.66.1 — 2026-11-22
+
+`seq serve` can split a model's blocks across the GPUs of a server run as two processes or more, and
+`seq teleop serve --record` keeps a robot's first step.
+
+### Added
+
+- `seq serve --pipeline-parallel` runs a model's blocks in stages across the GPUs of a server started with
+  `torchrun --nproc-per-node N`, kept where acts get faster and the answers stay within your `--tolerance`.
+
+### Fixed
+
+- `seq teleop serve --record` keeps a robot's first step, also when the robot calls `observe()` as soon as
+  `wait_until_ready()` returns.
+
 ## 0.66.0 — 2026-11-21
 
 Teleoperation is open source and takes a headset, a gamepad or the keys, `seq serve` runs a template by its name,

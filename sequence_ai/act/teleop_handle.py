@@ -130,8 +130,9 @@ class TeleopHandle:
         return episode
 
     def wait_until_ready(self, timeout_s: Optional[float] = None, poll_s: float = 5.0) -> float:
-        """Until the platform has heard this robot, so a console can reach it: the seconds it took. The platform's
-        refusal raised; Unavailable past `timeout_s`. `poll_s` means nothing here."""
+        """Until the platform has heard this robot, so a console can reach it, and its Record is on where it says so -
+        an observe() at once after it is kept: the seconds it took. The platform's refusal raised; Unavailable past
+        `timeout_s`. `poll_s` means nothing here."""
         began = time.monotonic()
         self._link.wait_ready(timeout_s)
         self.teleop.check()

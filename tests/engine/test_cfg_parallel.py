@@ -130,9 +130,10 @@ SERVER = HERE / "_cfg_parallel_server.py"
 
 
 class _Servers:
-    """The processes of one server (tests/engine/_cfg_parallel_server.py), each one's output to a file of its own."""
+    """The processes of one server (tests/engine/_cfg_parallel_server.py, or `server`), each one's output to a file of
+    its own."""
 
-    def __init__(self, tmp: pathlib.Path, world: int, *flags: str) -> None:
+    def __init__(self, tmp: pathlib.Path, world: int, *flags: str, server: pathlib.Path = SERVER) -> None:
         self.port, master, rankport = _free_port(), _free_port(), _free_port()
         self.url = f"http://127.0.0.1:{self.port}"
         self.logs, self.procs = [], []
@@ -144,7 +145,7 @@ class _Servers:
             log = tmp / f"server-{world}-{rank}.log"
             self.logs.append(log)
             with open(log, "w") as out:
-                self.procs.append(subprocess.Popen([sys.executable, str(SERVER), str(self.port), *flags],
+                self.procs.append(subprocess.Popen([sys.executable, str(server), str(self.port), *flags],
                                                    env={**base, **ranked, "OMP_NUM_THREADS": "1"}, stdout=out,
                                                    stderr=subprocess.STDOUT))
 

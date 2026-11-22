@@ -210,6 +210,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cfg-parallel", action="store_true", dest="cfg_parallel",
                    help="on a server of two processes (torchrun --nproc-per-node 2), try running the half of each "
                         "guidance batch on each (needs --tolerance)")
+    p.add_argument("--pipeline-parallel", action="store_true", dest="pipeline_parallel",
+                   help="on a server of two processes or more (torchrun --nproc-per-node N), try splitting the "
+                        "model's blocks into one stage each, its calls passed through them in parts (needs "
+                        "--tolerance)")
     p.add_argument("--tolerance", type=_tolerance, default=None, metavar="LIMIT",
                    help="the difference from eager mode's answers you accept for the switches above: a number (the "
                         "largest absolute difference), or max_abs=...,mean_abs=...,cosine=...")

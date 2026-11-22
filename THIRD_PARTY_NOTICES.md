@@ -40,13 +40,19 @@ unchanged. Each is named here with its license.
 
 ## xDiT
 
-- **Where:** `sequence_ai/engine/cfg_parallel.py`, a model's classifier-free guidance split between two processes.
+- **Where:** `sequence_ai/engine/cfg_parallel.py`, a model's classifier-free guidance split between two processes; and
+  `sequence_ai/engine/pipeline_parallel.py`, its patches of a diffusion transformer's tokens.
 - **From:** `_process_cfg_split_batch` in `xfuser/model_executor/pipelines/base_pipeline.py` and `_backbone_forward` in
-  `xfuser/model_executor/pipelines/pipeline_stable_diffusion_3.py` of
-  [xdit-project/xDiT](https://github.com/xdit-project/xDiT), at commit 5558f7e.
-- **Why:** so that a policy whose model runs its guidance's two halves as one batch runs each half on a GPU of its own.
-  Changed as the file's docstring says: the split made around a model's call, not in a pipeline's own loop; the batch
-  cut in half along its first dimension; the two outputs gathered back into the whole batch's.
+  `xfuser/model_executor/pipelines/pipeline_stable_diffusion_3.py`; for the patches, `update_and_get_kv_cache` and
+  `_naive_cache_update` in `xfuser/core/cache_manager/cache_manager.py` and the token ranges of
+  `xfuser/model_executor/pipefusion/layout.py` - all of [xdit-project/xDiT](https://github.com/xdit-project/xDiT), at
+  commit 5558f7e.
+- **Why:** so that a policy whose model runs its guidance's two halves as one batch runs each half on a GPU of its own;
+  and so that a diffusion transformer's call of one observation is pipelined across GPUs, each patch's attention
+  reading the other patches' keys and values as last computed. Changed as each file's docstring says: the guidance's
+  split made around a model's call, not in a pipeline's own loop, the batch cut in half along its first dimension and
+  the two outputs gathered back into the whole batch's; the patches' keys and values kept at the attention's call of
+  `scaled_dot_product_attention`, for any block, and the stages run by PyTorch's own pipelining.
 - **License:** Apache License, Version 2.0, the same as this project's [LICENSE](LICENSE). The repository carries no
   NOTICE file.
 

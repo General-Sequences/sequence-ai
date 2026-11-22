@@ -128,7 +128,7 @@ from ..network import msgpack_io
 from ..network.loop import steps as _steps
 from . import ranks as _ranks
 from . import recorder as _record
-from . import slack
+from . import slack, split_trials
 
 try:                                    # the platform's data plane, where sequence-base is installed (Python 3.10+)
     from .data_plane import Refused as _Refused
@@ -478,7 +478,7 @@ class App:
                  examples: Optional[list] = None, cuda_graphs: Optional[bool] = None,
                  whole_graph: Optional[bool] = None, torch_compile: bool = False, fused_kernels: bool = False,
                  tensorrt: bool = False, precision: Optional[str] = None, tolerance: Any = None,
-                 cfg_parallel: bool = False) -> None:
+                 cfg_parallel: bool = False, pipeline_parallel: bool = False) -> None:
         if not callable(policy):
             hint = ": an object with an infer method is served as policy.infer" if hasattr(policy, "infer") else ""
             raise TypeError(f"serve() takes the policy as a function, an observation in and its output out; it was "
@@ -517,8 +517,12 @@ class App:
 
         self._speedups = check_switches(cuda_graphs=cuda_graphs, whole_graph=whole_graph, torch_compile=torch_compile,
                                         fused_kernels=fused_kernels, tensorrt=tensorrt, precision=precision,
-                                        tolerance=tolerance, cfg_parallel=cfg_parallel)
+                                        tolerance=tolerance, cfg_parallel=cfg_parallel,
+                                        pipeline_parallel=pipeline_parallel)
         self._cfg_patches: list = []       # cfg_parallel's, put in place on this rank (engine.cfg_parallel)
+        # pipeline_parallel's split of this rank's policy and what it was made from (engine.pipeline_parallel)
+        self._pp_split: Any = None
+        self._pp_spec: Optional[dict] = None
         self._trying = self._speedups["precision"] is not None or any(
             self._speedups[name] or self._speedups[name] is None
             for name in ("cuda_graphs", "whole_graph", "torch_compile", "fused_kernels", "tensorrt"))
@@ -581,6 +585,8 @@ class App:
     def _call_here(self, items: list) -> list:
         """_call, on this process's policy alone - rank 0's own part, and each other rank's when rank 0 sends it."""
         started = time.perf_counter()
+        if self._pp_split is not None:
+            self._pp_split.begin()             # a new act: its first call of the blocks runs whole, on every rank
         if self._sizes is None:
             outputs = [self._policy(items[0])]
         else:
@@ -646,13 +652,19 @@ class App:
         if self._speedups["cfg_parallel"]:         # its trial runs every call and every toggle on every rank
             try:
                 examples = [_own(msgpack_io.unpack(msgpack_io.pack(observation))) for observation in self._examples]
-                tried = await loop.run_in_executor(self._thread, self._cfg_trial, examples)
+                tried = await loop.run_in_executor(self._thread, split_trials.cfg_trial, self, examples)
             except Exception as e:  # noqa: BLE001 (the policy raised on an example in eager mode, or a rank left)
                 self._fail(e)
                 return
-            self.optimized = {**self.optimized, **{k: v for k, v in tried.items() if k not in ("on", "switches")},
-                              "on": list(self.optimized.get("on") or []) + list(tried["on"]),
-                              "switches": {**(self.optimized.get("switches") or {}), **tried["switches"]}}
+            self.optimized = _with_tried(self.optimized, tried)
+        if self._speedups["pipeline_parallel"]:    # its trial too: every call and every toggle on every rank
+            try:
+                examples = [_own(msgpack_io.unpack(msgpack_io.pack(observation))) for observation in self._examples]
+                tried = await loop.run_in_executor(self._thread, split_trials.pp_trial, self, examples)
+            except Exception as e:  # noqa: BLE001 (the policy raised on an example in eager mode, or a rank left)
+                self._fail(e)
+                return
+            self.optimized = _with_tried(self.optimized, tried)
         runs = 2 if self._fleet is None else 1 + slack.RUNS       # timed as slack.measure times a size
         try:
             for n in self._sizes or [1]:
@@ -712,7 +724,8 @@ class App:
         changed in place, so that call then serves what was kept."""
         from .optimize import optimize
 
-        speedups = {name: value for name, value in self._speedups.items() if name != "cfg_parallel"}
+        speedups = {name: value for name, value in self._speedups.items()
+                    if name not in ("cfg_parallel", "pipeline_parallel")}
         said = optimize(self._checked(), examples, batch=self._sizes, say=lambda line: log.info("%s", line),
                         **speedups)
         return said.report
@@ -721,46 +734,6 @@ class App:
         """What the speed-ups look for the policy's modules in: the copy's call where it names one (`checked`), and a
         policy served with no copy of a class's: the policy itself."""
         return getattr(self._plane.copy, "checked", None) or self._policy
-
-    def _cfg_trial(self, examples: list) -> dict:
-        """On rank 0's policy thread: cfg_parallel tried on `examples` (engine.cfg_parallel.trial), each call of the
-        policy and each toggle of the split sent to every rank first; its report. Off, saying why, for a server that is
-        not two processes."""
-        from . import cfg_parallel
-
-        def say(line: str) -> None:
-            log.info("%s", line)
-
-        size = 1 if self._group is None else self._group.size
-        if size != cfg_parallel.WORLD:
-            why = (f"it cuts a batch between {cfg_parallel.WORLD} processes, and this server is {size}: start it as "
-                   f"{cfg_parallel.WORLD} (torchrun --nproc-per-node {cfg_parallel.WORLD})")
-            say(f"optimize: cfg_parallel off - {why}")
-            return {"on": [], "switches": {"cfg_parallel": {"on": False, "why": why}}}
-        batched = self._sizes is not None
-
-        def call(item: Any) -> Any:
-            got = self._call(list(item) if batched else [item])
-            return [output for output, _ in got] if batched else got[0][0]
-
-        def toggle(paths: list, on: bool) -> None:
-            self._group.run("cfg_parallel", [list(paths), bool(on)], lambda: self._cfg_toggle(list(paths), bool(on)))
-
-        return cfg_parallel.trial(self._checked(), call, toggle, examples, sizes=self._sizes,
-                                  limits=self._speedups["tolerance"], say=say)
-
-    def _cfg_toggle(self, paths: list, on: bool) -> None:
-        """cfg_parallel put in place on `paths` of this rank's policy, or taken out (engine.cfg_parallel) - on every
-        rank alike, rank 0 sending it to the others (Group.run)."""
-        from . import cfg_parallel
-        from .optimize import _namespace
-
-        if on and not self._cfg_patches:
-            self._cfg_patches = cfg_parallel.install(_namespace(self._checked()), paths,
-                                                     say=lambda line: log.info("%s", line))
-        elif not on and self._cfg_patches:
-            cfg_parallel.uninstall(self._cfg_patches)
-            self._cfg_patches = []
 
     def _fail(self, e: BaseException) -> None:
         self.failure = e
@@ -1121,6 +1094,14 @@ async def _body(receive, limit: int) -> Optional[bytes]:
     return b"".join(chunks)
 
 
+def _with_tried(optimized: dict, tried: dict) -> dict:
+    """What the warm-up kept, with a trial's report added (cfg_parallel's, pipeline_parallel's): its switches and what
+    it turned on after the ones before it."""
+    return {**optimized, **{k: v for k, v in tried.items() if k not in ("on", "switches")},
+            "on": list(optimized.get("on") or []) + list(tried["on"]),
+            "switches": {**(optimized.get("switches") or {}), **tried["switches"]}}
+
+
 def _own(value: Any) -> Any:
     """`value` with each read-only numpy array in it - in dicts, lists and tuples - as a writable copy, the policy's
     own.
@@ -1195,7 +1176,8 @@ def serve(policy: Callable[[Any], Any], *, host: Optional[str] = None, port: int
           action_chunk_replan_at: Optional[int] = None, max_wait_for_batch: Optional[float] = None,
           examples: Optional[list] = None, cuda_graphs: Optional[bool] = None, whole_graph: Optional[bool] = None,
           torch_compile: bool = False, fused_kernels: bool = False, tensorrt: bool = False,
-          precision: Optional[str] = None, tolerance: Any = None, cfg_parallel: bool = False) -> None:
+          precision: Optional[str] = None, tolerance: Any = None, cfg_parallel: bool = False,
+          pipeline_parallel: bool = False) -> None:
     """
     Serve `policy` to robots elsewhere until the process is stopped (Ctrl-C), the module's docstring having what each
     part does by default:
@@ -1234,6 +1216,11 @@ def serve(policy: Callable[[Any], Any], *, host: Optional[str] = None, port: int
     cfg_parallel  True, on a server of two processes (torchrun --nproc-per-node 2): the policy's model called with its
                guidance's two halves in one batch runs one half in each, tried during rank 0's warm-up and kept where
                its outputs stay within `tolerance` and acts are faster (engine.cfg_parallel)
+    pipeline_parallel  True, on a server of two processes or more (torchrun --nproc-per-node N): the run of blocks the
+               policy's model calls one after another split into one stage a process, each call of it passed through
+               the stages in parts - a diffusion transformer's tokens in patches, or rows of its batch - tried during
+               rank 0's warm-up and kept where its outputs stay within `tolerance` and acts are faster
+               (engine.pipeline_parallel)
     copy       the copy of the policy each episode's frames go to (engine.episodes.PolicyCopy: a @seq.policy class's
                episodes, observe function, on_episode and plans, as a deployment's worker runs them); `policy` is then
                its call - `seq serve` gives both
@@ -1258,7 +1245,8 @@ def serve(policy: Callable[[Any], Any], *, host: Optional[str] = None, port: int
               action_chunk_valid_len=action_chunk_valid_len, action_chunk_replan_at=action_chunk_replan_at,
               max_wait_for_batch=max_wait_for_batch, examples=examples, cuda_graphs=cuda_graphs,
               whole_graph=whole_graph, torch_compile=torch_compile, fused_kernels=fused_kernels, tensorrt=tensorrt,
-              precision=precision, tolerance=tolerance, cfg_parallel=cfg_parallel)
+              precision=precision, tolerance=tolerance, cfg_parallel=cfg_parallel,
+              pipeline_parallel=pipeline_parallel)
     if app._group is not None and not app._group.leads:
         _follow(app, log_level)                       # a rank other than 0: no port of robots', rank 0's calls alone
         return
@@ -1311,7 +1299,10 @@ def _follow(app: App, log_level: Optional[str]) -> None:
         if op == "call":                              # a batch of acts, or the warm-up's
             return app._thread.submit(app._call_here, app._unwire(args[0])).result()
         if op == "cfg_parallel":                      # the split put in place, or taken out, as on rank 0
-            return app._thread.submit(app._cfg_toggle, *args).result()
+            return app._thread.submit(split_trials.cfg_toggle, app, *args).result()
+        if op == "pipeline_parallel":                 # the blocks' stages put in place, or taken out, as on rank 0
+            app._thread.submit(split_trials.pp_toggle, app, *args).result()
+            return None
         fn = app._mirrored.get(op)                    # an episode's frames to its observe function, its end, ...
         if fn is None:
             raise ValueError(f"rank 0 sent a call this rank does not know: {op!r}")

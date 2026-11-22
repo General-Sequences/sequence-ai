@@ -159,7 +159,8 @@ def _dispatch(args: argparse.Namespace) -> int:
                                  token=args.token, base_url=args.base_url, cuda_graphs=args.cuda_graphs,
                                  whole_graph=args.whole_graph, torch_compile=args.torch_compile,
                                  fused_kernels=args.fused_kernels, tensorrt=args.tensorrt, precision=args.precision,
-                                 tolerance=args.tolerance, cfg_parallel=args.cfg_parallel)
+                                 tolerance=args.tolerance, cfg_parallel=args.cfg_parallel,
+                                 pipeline_parallel=args.pipeline_parallel)
     if args.cmd == "teleop":
         import os
 

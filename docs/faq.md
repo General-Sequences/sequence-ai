@@ -316,8 +316,9 @@ line say `with cuda_graphs on in both`.
 
 ### `ValueError: torch_compile changes the policy's outputs: give tolerance=...`
 
-`torch_compile`, `fused_kernels`, `tensorrt`, `precision` and `cfg_parallel` change the outputs, so each runs only
-with the difference you accept: `seq serve --tolerance 1e-3`, or `--tolerance max_abs=0.02,cosine=0.999`.
+`torch_compile`, `fused_kernels`, `tensorrt`, `precision`, `cfg_parallel` and `pipeline_parallel` change the
+outputs, so each runs only with the difference you accept: `seq serve --tolerance 1e-3`, or
+`--tolerance max_abs=0.02,cosine=0.999`.
 
 ### Every switch stayed off: no faster
 

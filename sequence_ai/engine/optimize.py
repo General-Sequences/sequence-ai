@@ -139,7 +139,8 @@ class _Run(NamedTuple):
 
 def check_switches(*, cuda_graphs: Optional[bool] = None, whole_graph: Optional[bool] = None,
                    torch_compile: bool = False, fused_kernels: bool = False, tensorrt: bool = False,
-                   precision: Optional[str] = None, tolerance: Any = None, cfg_parallel: bool = False) -> dict:
+                   precision: Optional[str] = None, tolerance: Any = None, cfg_parallel: bool = False,
+                   pipeline_parallel: bool = False) -> dict:
     """The switches asked for, as optimize() takes them, and `tolerance` as a dict of its limits; ValueError naming
     what is wrong: a switch that changes the outputs without `tolerance`, a precision that is none of None, "fp32",
     "fp16", "fp8", or fp8 with tensorrt. serve() checks them before it starts, so a mistake is said at once."""
@@ -148,6 +149,7 @@ def check_switches(*, cuda_graphs: Optional[bool] = None, whole_graph: Optional[
                          "\"fp8\"")
     changing = [name for name, on in (("torch_compile", torch_compile), ("fused_kernels", fused_kernels),
                                       ("tensorrt", tensorrt), ("cfg_parallel", cfg_parallel),
+                                      ("pipeline_parallel", pipeline_parallel),
                                       (f"precision={precision!r}", precision is not None))
                 if on]
     limits = _tolerance(tolerance)
@@ -162,7 +164,7 @@ def check_switches(*, cuda_graphs: Optional[bool] = None, whole_graph: Optional[
     return {"cuda_graphs": None if cuda_graphs is None else bool(cuda_graphs),
             "whole_graph": None if whole_graph is None else bool(whole_graph), "torch_compile": bool(torch_compile),
             "fused_kernels": bool(fused_kernels), "tensorrt": bool(tensorrt), "precision": precision,
-            "cfg_parallel": bool(cfg_parallel), "tolerance": limits}
+            "cfg_parallel": bool(cfg_parallel), "pipeline_parallel": bool(pipeline_parallel), "tolerance": limits}
 
 
 def _tolerance(tolerance: Any) -> Optional[dict]:

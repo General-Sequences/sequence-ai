@@ -92,7 +92,8 @@ class RobotLink:
         return Transport(api_key=self._api_key, base_url=base_url, timeout_s=timeout_s, robot_of=robot_of)
 
     def wait_ready(self, timeout_s: Optional[float]) -> None:
-        """Until its server answered this link's first round, or refused it. Unavailable past `timeout_s`."""
+        """Until its server answered this link's first round, its Record on where that answer says so, or refused it.
+        Unavailable past `timeout_s`."""
         if not self._answered.wait(timeout_s):
             raise Unavailable(f"{self.where} did not answer this robot's link within {timeout_s} s", hint="ask again")
 
@@ -132,9 +133,12 @@ class RobotLink:
 
         wait_s = READY_WAIT_S if not self._answered.is_set() else WAIT_S
         body = self._link.post(LINK, {"session": self.session, "sdk": _version(), "direct": True, "wait_s": wait_s})
-        self._answered.set()
         settings = body.get("settings") or {}
         self.recording.configure(settings.get("record"), settings.get("robot"))
+
+
+
+        self._answered.set()
         self._driven.moq(settings.get("moq"))
         self._take(body.get("offers") or ())
 

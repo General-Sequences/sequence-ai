@@ -15,6 +15,7 @@ the policy up on its `@seq.sample` episode, checks it on those observations, and
 | `tensorrt` | `--tensorrt` | no | yes | Builds those modules with TensorRT, TF32 off. Install the torch-tensorrt made for your torch: `pip install "torch-tensorrt==2.9.*"` for torch 2.9. |
 | `precision` | `--precision fp16`, `fp32` or `fp8` | no: the model's own dtype | yes | `fp16` or `fp32` runs those modules in that dtype. `fp8` runs their linear layers in 8-bit floating point, on a GPU of compute capability 8.9 or later (L4, H100). |
 | `cfg_parallel` | `--cfg-parallel`, with `seq serve` started as two processes: `torchrun --nproc-per-node 2 -m seq serve ...` | no | yes | Splits a model's classifier-free guidance between the two processes, each on a GPU of one type: each call of a module the policy makes with the guidance's two halves in one batch runs one half in each process, and the two come back as one answer. |
+| `pipeline_parallel` | `--pipeline-parallel`, with `seq serve` started as two processes or more: `torchrun --nproc-per-node 2 -m seq serve ...` | no | yes | Splits the blocks the model calls one after another, a transformer's layers, into one stage a process, each with as many blocks as its GPU runs in the time the others run theirs, so GPUs of different types can share them. Each call goes through the stages in parts, so they work at once: a diffusion transformer's tokens in patches, each patch's attention reading the other patches' keys and values from the step before, or rows of a batch of several robots. |
 
 ## A switch that changes the outputs needs a tolerance
 
@@ -73,7 +74,7 @@ A policy whose model `jax.jit` compiles gets each switch's counterpart in XLA:
 | `precision` | Casts the parameters its jitted functions are given to `fp16` or `fp32`. |
 | `torch_compile`, `fused_kernels` | Nothing to add: XLA compiles each jitted function whole and fuses its kernels already. |
 | `tensorrt` | No counterpart: TensorRT builds torch modules. |
-| `cfg_parallel` | No counterpart: it splits the calls of torch modules. |
+| `cfg_parallel`, `pipeline_parallel` | No counterpart: they split the calls of torch modules. |
 
 XLA already puts most of a jitted function's work in command buffers, so on a JAX policy these two are tried only when
 you turn them on: `seq serve --cuda-graphs --whole-graph`. The checks are the same. The random key the policy holds is
@@ -88,6 +89,11 @@ set from each run's seed, so two runs of one observation draw the same noise.
   `whole_graph` can still cover the run.
 - `cfg_parallel` needs `seq serve` started as two processes, and a module the policy calls with the guidance's two
   halves in one even batch: a policy that runs its guidance as two calls has nothing to split.
+- `pipeline_parallel` needs `seq serve` started as two processes or more, and a list of blocks (a `ModuleList` or
+  `Sequential`) the model calls one after another, each on the one before's output. Its patches need a transformer's
+  tokens as the blocks' input and a self-attention without a mask that runs through
+  `torch.nn.functional.scaled_dot_product_attention`; parts of a batch make one robot's act no faster. Each process
+  holds the whole model, so it makes a policy faster and does not fit one larger than a GPU.
 - `fp8` needs a GPU of compute capability 8.9 or later. A linear layer whose output moves more than 5% in fp8 keeps
   its own precision, and the choice is kept in `~/.cache/sequence-ai/fp8` for the next start.
 
