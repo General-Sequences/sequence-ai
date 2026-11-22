@@ -3,6 +3,16 @@
 What changed in each release of SequenceLink's package, `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
+## 0.66.2 — 2026-11-22
+
+The platform's names on `seq` and `sequence_ai` come from sequence-cloud even where an older release's files were
+left in the package.
+
+### Fixed
+
+- `seq.benchmark` and the platform's other names no longer say "has no attribute" when a newer release was copied
+  over an older one.
+
 ## 0.66.1 — 2026-11-22
 
 `seq serve` can split a model's blocks across the GPUs of a server run as two processes or more, and
