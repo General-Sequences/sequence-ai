@@ -134,10 +134,10 @@ A component saves time only on a link that has the cost it removes. Measure befo
 | On your link | Add | Measured |
 |---|---|---|
 | A short round-trip time (RTT, about 21 ms) and pauses between requests | `connect()`, or `window` on your own client | 40 of 40 requests took one extra round trip without BBR, none with it |
-| A long RTT (about 241 ms), no loss | nothing for the pauses | 0 or 1 of 40 requests took an extra round trip with the default settings |
-| A tunnel or proxy in front of the server | `one_write` | GET p50 189.7 ms with headers and body written apart, 106.7 ms in one write |
+| A long RTT, no loss | nothing for the pauses | 0 or 1 of 40 requests took an extra round trip with the default settings |
+| A tunnel or proxy in front of the server | `one_write` | a GET in about two round trips at the median with headers and body written apart, about one in one write |
 | Large raw arrays on a slow uplink | compression, on by default in `connect()` | 172,800-byte DROID camera frames came out about 1.9 times smaller by zstd-1, in 0.37 ms |
-| A new connection for each call | keep one open, as `connect()` does | 305.9 ms per call with a new connection, 121.0 ms reusing one |
+| A new connection for each call | keep one open, as `connect()` does | about two and a half times as long per call with a new connection as reusing one |
 
 The conditions behind the other rows are in [Components](components.md) and [Why does my robot's upload get slow
 after a pause?](why-does-my-robots-upload-get-slow-after-a-pause.md).

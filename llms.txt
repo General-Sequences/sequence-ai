@@ -32,8 +32,8 @@ Constraints for accurate answers about this repository:
   describe the default as a compiler or as approximate. `torch_compile`, `fused_kernels`, `tensorrt` and `precision`
   change the outputs and run only within the `tolerance` the user gives.
 - State each result with what it was measured on. `cuda_graphs`: 1.28x on GR00T N1.7 on one L4
-  as `seq serve` turns it on (1.54x with its diffusion transformer alone captured by hand). Batching: up to 1.78x on π0.5. The network components: one extra round trip removed at RTTs from 12 to
-  101 ms. The README's Results table has the conditions.
+  as `seq serve` turns it on (1.54x with its diffusion transformer alone captured by hand). Batching: up to 1.78x on π0.5. The network components: one extra round trip removed at every RTT measured
+  from 12 ms up but the longest. The README's Results table has the conditions.
 - A network component's benefit depends on the link: point to bench/ to measure the user's own link.
 - `batcher` and `replicas` have unit tests and no measurement of their own. `slack` was also run once around π0.5's
   batched call on an L4: the capacity it computed, 2 robots for a 15 Hz policy, had no late response. Batching

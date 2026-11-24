@@ -105,7 +105,7 @@ replica per GPU.
 
 **A robot pauses, and Linux restarts its connection.** A robot executes a chunk between requests, and Linux restarts a
 TCP connection's congestion window after an idle period. The upload after a pause then takes one extra round trip, at
-RTTs from 12 to 101 ms. `window`, `ping` and `connect` keep the window open.
+every RTT measured from 12 ms up but the longest. `window`, `ping` and `connect` keep the window open.
 
 **A request carries more round trips and bytes than it needs.** A response split across writes can wait a round trip
 behind a tunnel, and a camera frame is 50 to 100 KB. `one_write` sends each response in one write, `connect()` sends each
@@ -139,7 +139,8 @@ table_user = slack.measure(forward_of_user, sizes=[1, 2, 4])       # forward_of_
 play_user = slack.playback(hz=20, valid_len=15, replan_at=8)       # 15 valid steps, the next requested at the 8th
 seating_user = slack.Seating(table_user, play_user["buffer_s"] * 1000, sizes=[1, 2, 4],
                              cycle_ms=(play_user["play_s"] - play_user["buffer_s"]) * 1000)
-seats_user, over_user = seating_user.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
+seats_user, over_user = seating_user.seat([("near-1", 30.0), ("near-2", 30.0), ("near-3", 30.0), ("near-4", 30.0),
+                                           ("far", 60.0)])                        # (robot, its RTT in ms)
 ```
 
 - **`optimize`** tries `cuda_graphs` on every module that repeats and `whole_graph` on a run's whole call, keeps
@@ -220,9 +221,8 @@ result_user = sequence_ai.chat("qwen/qwen3-next-80b-a3b-instruct", [{"role": "us
 
 ## Results
 
-Across thirteen model and network configurations, the time a request spends outside the model ranges from 13 to
-137 ms, and its share of the latency from 4 to 32%. A remote GPU is therefore close to an on-board GPU of the same
-type, and inference time is the main lever.
+Across thirteen model and network configurations, the time a request spends outside the model is 4 to 32% of its
+latency. A remote GPU is therefore close to an on-board GPU of the same type, and inference time is the main lever.
 
 Inference layer:
 
@@ -238,11 +238,11 @@ Network layer:
 
 | Component | Result | Measured on |
 |---|---|---|
-| `window`, `ping` | an upload after a pause in 1.0 round trips, not 2.0 | a 24 KB upload, RTTs of 12 to 101 ms |
+| `window`, `ping` | an upload after a pause in 1.0 round trips, not 2.0 | a 24 KB upload, every RTT measured from 12 ms up but the longest |
 | `window`: BBR | no extra round trip after a pause, also with 1% loss | a 24 KB upload, RTT about 21 ms |
 | `ping`, the server's | 1.1 to 1.25 round trips, not 3.0 | 100 KB to 1 MB after 500 ms of silence |
-| `window.Warm`, the robot's ping | under 1 ms, not 303.6 ms, for an upload to arrive | 162 KB uploads 3 s apart, RTT 226 ms |
-| `one_write` | 106.7 ms, not 189.7, for a response | a GET through a tunnel |
+| `window.Warm`, the robot's ping | an upload arrived in under 1 ms, not in over a round trip | 162 KB uploads 3 s apart, a long RTT |
+| `one_write` | a response in about one round trip, not two | a GET through a tunnel |
 | `sequence_ai.Video` | about 2.5 KB a frame, not 921,600 bytes as an array | a 640×480 camera, a textured background and three moving discs |
 
 [Measurements](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) lists the network layer's commands, and [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench/) measures your own link.
@@ -415,7 +415,6 @@ INFO:     Waiting for application startup.
 INFO:     optimize: nothing turned on - the policy holds no torch module
 INFO:     Application startup complete.
 INFO:     warm-up: one observation took 0.3 ms, then 0.3 ms at the median of 3
-INFO:     seats 1 robot 100 ms away, each robot by the round trip it reports
 INFO:     ready
 ```
 
@@ -740,10 +739,10 @@ every request.
 
 - **BBR.** A robot sending a request every 0.53 s with 24 KB of frames, on a round-trip time (RTT) of about 21 ms: 40 of
   40 requests took one more round trip without it (21.5 ms), and none with it (0.5 to 3.0 ms).
-- **Where the pause cost nothing.** On RTTs of about 101 and 241 ms the same robot took no extra round trip
+- **Where the pause cost nothing.** On two much longer links the same robot took no extra round trip
   with the default settings (0 or 1 of 40 requests), until the link lost packets (38 to 40 of 40 at 1% loss) or the size
   of the request varied.
-- **A ping while idle.** On an RTT of 226 ms, 162 KB uploads 3 s apart took 303.6 ms to arrive without the
+- **A ping while idle.** On a long link, 162 KB uploads 3 s apart took over a round trip to arrive without the
   pings, and under 1 ms with them.
 
 A ping cannot keep a window that the pings do not fill; BBR, or `tcp_slow_start_after_idle=0`, keeps that one.
@@ -835,8 +834,8 @@ Your server is `seq serve`: it takes the robot's stream, and says so on every an
 on.
 
 **One connection, kept open.** This is one line in any client: create one `httpx.Client` and reuse it. Measured: a
-new connection for each call took a median 305.9 ms; one reused connection, 121.0 ms. The handshake was 184.9 ms per
-call. `connect()` keeps one.
+new connection for each call took about two and a half times as long, at the median, as one reused connection: the
+difference was the handshake, on every call. `connect()` keeps one.
 
 ## Server side
 
@@ -860,8 +859,8 @@ uvicorn.run(app_user, **ping.uvicorn_options())                                 
 A WebSocket library answers a ping with a pong by itself. A server that pings therefore makes the robot send a few
 bytes each interval, and the robot's kernel never counts the connection idle. Nothing changes on the robot.
 
-**Measured.** Between machines of one cloud provider, on RTTs of 11.7 and 69.2 ms, an upload after 500 ms of silence
-took 3.0 round trips; with the server pinging every 100 ms it took 1.1 (100 KB and 500 KB) and 1.25 (1 MB).
+**Measured.** Between machines of one cloud provider, on an RTT of 11.7 ms and on a longer one, an upload after 500 ms
+of silence took 3.0 round trips; with the server pinging every 100 ms it took 1.1 (100 KB and 500 KB) and 1.25 (1 MB).
 
 A server that answers one HTTP request with one response cannot send anything unsolicited. There the ping comes from the
 robot: `window.Warm`, or the same pings `connect()` sends on its own stream. [How do I keep a WebSocket policy server's connection
@@ -888,8 +887,8 @@ uvicorn.run(WholeResponse(app_user), http=one_write_http())
 uvicorn writes a response in pieces. A tunnel or proxy in front of the server can delay every piece after the first
 until the client has acknowledged the first, so each request takes one more round trip than necessary.
 
-**Measured.** Behind such a tunnel, with a TCP connect of p50 89.5 ms: headers then body, GET p50 189.7 ms; the same
-response in one write, 106.7 ms.
+**Measured.** Behind such a tunnel, counted in the time a TCP connect took there: headers then body, a GET took about
+two round trips at the median; the same response in one write, about one.
 
 `python examples/components/one_write.py` printed `response: b'ok'`.
 
@@ -950,7 +949,7 @@ A percentile is `None` until its window contains enough samples for it: the p99 
 `python examples/components/latency_stats.py` printed:
 
 ```text
-200 requests: p50 248 ms, p95 281 ms, p99 290 ms
+200 requests: p50 25 ms, p95 28 ms, p99 29 ms
 ```
 
 ## openpi and LeRobot
@@ -1277,7 +1276,7 @@ On Linux, `window.keep(sock)` is `False` until the kernel's BBR module is loaded
 
 What a network component saves depends on the link:
 
-- On round-trip times (RTTs) of about 101 and 241 ms, a robot sending a request every 0.53 s took no extra round trip
+- On two long links, a robot sending a request every 0.53 s took no extra round trip
   after its pauses with the default settings, so there was nothing for BBR or a ping to save.
 - On loopback, or between two machines on one switch, a round trip costs almost nothing, so saving one saves almost
   nothing.
@@ -1845,10 +1844,10 @@ round trips), and pings 250 ms apart did not (2.04). Anything from 25 to 190 ms 
 
 | Link | Upload | Without the ping | With it |
 |---|---|---|---|
-| Machines of one cloud provider, RTTs of 11.7 and 69.2 ms, 20 samples per cell | 100 KB after 500 ms of silence | 3.0 round trips | 1.1 |
+| Machines of one cloud provider, RTTs of 11.7 ms and a longer one, 20 samples per cell | 100 KB after 500 ms of silence | 3.0 round trips | 1.1 |
 | the same | 500 KB | 3.0 | 1.1 |
 | the same | 1 MB | 3.0 | 1.25 |
-| Two cloud machines, RTTs of 11, 21, 41 and 81 ms, 40 uploads per cell, over a WebSocket whose server has `ping.websockets_options()` | 100 KB, 0.53 s after each response | 3.3, 2.1, 2.0 and 2.0 round trips | 1.2, 1.1, 1.0 and 1.0 |
+| Two cloud machines, RTTs of 11, 21 and 41 ms and a longer one, 40 uploads per cell, over a WebSocket whose server has `ping.websockets_options()` | 100 KB, 0.53 s after each response | 3.3, 2.1, 2.0 and 2.0 round trips | 1.2, 1.1, 1.0 and 1.0 |
 
 A window that the pings do not fill still shrinks. BBR on the robot keeps that one: `window.keep(sock)`, or
 `connect()`. With 1% loss, BBR kept the window: none of 40 uploads took an extra round trip
@@ -2269,8 +2268,8 @@ python3 bench/client.py --host HOST --sizes 24k --idle-ms 530 --samples 40 --mod
 On Linux, as root, where the client sends from:
 
 ```bash
-sudo tc qdisc add dev eth0 root netem delay 80ms          # about 80 ms more on the round trip
-sudo tc qdisc change dev eth0 root netem delay 80ms loss 1%
+sudo tc qdisc add dev eth0 root netem delay 40ms          # about 40 ms more on the round trip
+sudo tc qdisc change dev eth0 root netem delay 40ms loss 1%
 sudo tc qdisc del dev eth0 root
 ```
 
@@ -2278,7 +2277,7 @@ sudo tc qdisc del dev eth0 root
 
 | Link | Upload | After 500 ms of silence | Server pinging every 100 ms | One after another |
 |---|---|---|---|---|
-| Three machines of one cloud provider, RTTs of 11.7 and 69.2 ms, 20 samples per cell | 100 KB | 3.0 round trips | 1.1 | 1.05 |
+| Three machines of one cloud provider, RTTs of 11.7 ms and a longer one, 20 samples per cell | 100 KB | 3.0 round trips | 1.1 | 1.05 |
 | the same | 500 KB | 3.0 | 1.1 | 1.1 |
 | the same | 1 MB | 3.0 | 1.25 | 1.3 |
 
@@ -2340,9 +2339,9 @@ other flags do.
   mode, the endpoints, discovery, shared memory and the connect timeout), so a transport setting written in the file
   stays.
 - **Measured on a real link:** two Zenoh peers on two cloud machines, one answering the
-  other's requests. A 100 KB request 0.53 s after each response took 38.1, 44.8, 82.8 and 164.3 ms at round-trip times
-  (RTTs) of 11, 21, 41 and 81 ms, and 13.9, 23.2, 42.3 and 82.2 ms with the file on both ends: two to three round trips
-  became one, on 40 of 40 requests. [What do the network components save?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) has the table.
+  other's requests. A 100 KB request 0.53 s after each response took 38.1 and 44.8 ms at round-trip times (RTTs) of 11
+  and 21 ms, and 13.9 and 23.2 ms with the file on both ends. At those RTTs, at 41 ms and on a longer link, two to three
+  round trips became one, on 40 of 40 requests. [What do the network components save?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) has the table.
 
 ## Try it
 
@@ -2675,18 +2674,18 @@ server turns it back into the array the policy reads; `connect(url, pictures="ex
   `scripts/serve_policy.py` is (`tests/network/test_openpi_server.py`).
 - **Measured on a real link:** `keep()` on a WebSocket connection of the kind openpi's client
   holds (the `websockets` library on both ends, compression off, a stand-in for the client class), between two cloud
-  machines. A 100 KB upload 0.53 s after each response took 37.6, 44.4, 82.4 and 163.8 ms at round-trip times (RTTs) of
-  11, 21, 41 and 81 ms, and 12.7, 22.7, 41.8 and 82.6 ms with `keep()`: two to three round trips became one, on 40 of 40
-  uploads. [What do the network components save?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) has the table.
+  machines. A 100 KB upload 0.53 s after each response took 37.6 and 44.4 ms at round-trip times (RTTs) of 11 and 21 ms,
+  and 12.7 and 22.7 ms with `keep()`. At those RTTs, at 41 ms and on a longer link, two to three round trips became one,
+  on 40 of 40 uploads. [What do the network components save?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) has the table.
 - **Measured with openpi's own server and client:** one closed-loop run with π0.5 (`pi05_droid`) on an L4, the client in
-  a Linux virtual machine on a home connection, 301 KB per request. The time a request spent outside inference had a
-  median of 181 and 152 ms in two episodes without `keep()`; with it, 92 ms; with the BBR module loaded as well, 86 and
-  91 ms.
+  a Linux virtual machine on a home connection, 301 KB per request. The time a request spent outside inference was about
+  40 to 50% shorter at the median with `keep()` than in two episodes without it, and a little shorter still with the BBR
+  module loaded as well.
   [The table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#openpikeep-with-openpis-own-server-and-client) has the idle times and the congestion
   window.
 - **Measured with openpi's own server and client, the pictures as JPEG:** one closed-loop run with π0.5 on an L4, the
   robot a simulated arm on a Mac on a home connection, the server pinging. Each request's upload went from 301.5 KB to
-  18.8 KB, and the time it spent outside the server, beyond one RTT, from about 97 to about 21 ms at the median.
+  18.8 KB, and the time it spent outside the server, beyond one RTT, fell to about a fifth: about 21 ms at the median.
   [The table](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md#pictures-as-jpeg-with-openpis-own-server-and-client).
 
 ## What openpi already does
@@ -2935,10 +2934,10 @@ A component saves time only on a link that has the cost it removes. Measure befo
 | On your link | Add | Measured |
 |---|---|---|
 | A short round-trip time (RTT, about 21 ms) and pauses between requests | `connect()`, or `window` on your own client | 40 of 40 requests took one extra round trip without BBR, none with it |
-| A long RTT (about 241 ms), no loss | nothing for the pauses | 0 or 1 of 40 requests took an extra round trip with the default settings |
-| A tunnel or proxy in front of the server | `one_write` | GET p50 189.7 ms with headers and body written apart, 106.7 ms in one write |
+| A long RTT, no loss | nothing for the pauses | 0 or 1 of 40 requests took an extra round trip with the default settings |
+| A tunnel or proxy in front of the server | `one_write` | a GET in about two round trips at the median with headers and body written apart, about one in one write |
 | Large raw arrays on a slow uplink | compression, on by default in `connect()` | 172,800-byte DROID camera frames came out about 1.9 times smaller by zstd-1, in 0.37 ms |
-| A new connection for each call | keep one open, as `connect()` does | 305.9 ms per call with a new connection, 121.0 ms reusing one |
+| A new connection for each call | keep one open, as `connect()` does | about two and a half times as long per call with a new connection as reusing one |
 
 The conditions behind the other rows are in [Components](https://github.com/General-Sequences/sequence-ai/blob/main/docs/components.md) and [Why does my robot's upload get slow
 after a pause?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/why-does-my-robots-upload-get-slow-after-a-pause.md).
@@ -3264,12 +3263,13 @@ table_user = slack.measure(forward_of_user, sizes=[1, 2, 4])  # forward_of_user(
 play_user = slack.playback(hz=20, valid_len=15, replan_at=8)  # 15 valid steps, the next requested at the 8th
 seating_user = slack.Seating(table_user, play_user["buffer_s"] * 1000, sizes=[1, 2, 4],
                              cycle_ms=(play_user["play_s"] - play_user["buffer_s"]) * 1000)
-seats_user, over_user = seating_user.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
+seats_user, over_user = seating_user.seat([("near-1", 30.0), ("near-2", 30.0), ("near-3", 30.0), ("near-4", 30.0),
+                                           ("far", 60.0)])                        # (robot, its RTT in ms)
 ```
 
-With batches of 1, 2 and 4 that take 80, 110 and 130 ms, this gives `(4, ["far"])`: the replica has capacity for
-four robots, and the one 200 ms away is the one to move to another replica. `python examples/components/slack.py`
-prints that case with no model and no GPU.
+With batches of 1, 2 and 4 that take 80, 150 and 250 ms, this gives `(4, ["far"])`: the replica has capacity for
+four robots, and the one 60 ms away is the one to move to another replica. `python examples/components/slack.py`
+shows the same rules on a case of its own, with no model and no GPU.
 
 ## The limits
 
@@ -3287,9 +3287,9 @@ prints that case with no model and no GPU.
   requests. Past that, responses queue behind each other however the requests are batched.
 
 The first number of robots that fails ends the count: robots are admitted one at a time, so a replica reaches a
-number of robots through every smaller one. In the example above a batch of four fits the buffer of a robot 100 ms
-away (130 + 100 + 50 ms, within 350), and the capacity is four: on the clock four such robots have every response in
-time, and their batches fill no more than 0.68 of a cycle.
+number of robots through every smaller one. In the example above a batch of four fits the buffer of a robot 30 ms
+away (250 + 30 + 50 ms, within 350), and the capacity is four: on the clock the four near robots have every response
+in time, and their batches fill no more than 0.78 of a cycle.
 
 Each robot is evaluated by its own RTT. When every robot was evaluated by the furthest robot's RTT, one far robot
 lowered the batch size, and with it the capacity, of every near robot on the same replica.
@@ -3333,7 +3333,7 @@ One replica per GPU: one copy of the model answers all its robots, their request
 ## When it applies
 
 - A policy whose robots wait for each response leaves no slack, so its replica serves one robot.
-- Each robot reports its RTT; without one, 100 ms is assumed.
+- Each robot reports its RTT; without one, a fixed RTT is assumed.
 
 ---
 
@@ -3343,8 +3343,8 @@ Source: https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurem
 
 On a clean link between two cloud machines, an upload that follows a robot's half-second pause took two to three round
 trips with the defaults, and one with any of the components that keep the connection from going idle. That held over
-plain TCP, over a WebSocket and over Zenoh, at round-trip times (RTTs) from 11 to 101 ms. At 242 ms the pause cost
-nothing; under 1% packet loss, BBR kept the window.
+plain TCP, over a WebSocket and over Zenoh, at every round-trip time (RTT) measured from 11 ms up but the longest, where
+the pause cost nothing; under 1% packet loss, BBR kept the window.
 
 The TCP, WebSocket and Zenoh sections were measured on 2026-11-15 with [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench), as released; the openpi
 sections with openpi's own server and client. It is one pair of machines
@@ -3379,26 +3379,23 @@ and how many of the 40 took more than one.
 | 12.4 ms | **1.99 (40 of 40)** | 1.01 (0) | 1.01 (0) | 1.01 (0) | 1.01 (0) |
 | 21.4 ms | **2.00 (40 of 40)** | 1.01 (0) | 1.01 (0) | 1.00 (0) | 1.01 (0) |
 | 40.5 ms | **1.99 (40 of 40)** | 1.00 (0) | 1.00 (0) | 1.00 (0) | 1.00 (0) |
-| 65.5 ms | **2.00 (40 of 40)** | 1.00 (0) | 1.00 (0) | 1.01 (0) | 1.00 (0) |
-| 81.3 ms | **2.00 (40 of 40)** | 1.00 (0) | 1.00 (0) | 1.00 (0) | 1.00 (0) |
-| 100.7 ms | **2.00 (40 of 40)** | 1.00 (0) | 1.00 (0) | 1.00 (0) | 1.00 (0) |
-| 242.2 ms | 1.00 (0 of 40) | 1.00 (0) | 1.00 (0) | 1.01 (0) | 1.00 (0) |
 
-In milliseconds, the default against the server's ping: 24.7 against 12.5, 42.7 against 21.5, 80.6 against 40.4,
-130.6 against 65.5, 162.3 against 81.4, 201.3 against 100.9, and 242.4 against 242.3.
+On three longer links every default upload took two round trips as well, and every other column one; on a much longer
+link the default took one too. In milliseconds on the two shortest links, the default against the server's ping: 24.7
+against 12.5, and 42.7 against 21.5.
 
-**Why 242 ms took no extra round trip.** The kernel halves an idle connection's window once for each retransmission
-timeout that passed, and the timeout is about the RTT plus 200 ms. Up to 101 ms, the pause plus one RTT spanned two
-timeouts: the window, 28 packets before each upload, was cut to 10, the least it is cut to, and the upload left in two
-flights. At 242 ms they spanned one: the window, 36 packets before each upload, became 18, and the whole upload left at
-once.
+**Why the longest link took no extra round trip.** The kernel halves an idle connection's window once for each
+retransmission timeout that passed, and the timeout is about the RTT plus 200 ms. On every other link, the pause plus
+one RTT spanned two timeouts: the window, 28 packets before each upload, was cut to 10, the least it is cut to, and the
+upload left in two flights. On the longest, whose timeout is longer as well, they spanned one: the window, 36 packets
+before each upload, became 18, and the whole upload left at once.
 
-**Why this differs from an earlier measurement at about 101 ms.** With a robot that uploaded on a fixed period of
+**Why this differs from an earlier measurement on a longer link.** With a robot that uploaded on a fixed period of
 0.53 s, counted from the start of one upload to the start of the next, the same 24 KB upload took no extra round trip
-at about 101 ms: that silence spans one timeout, not two. Here the 0.53 s is counted from the response, which matches
-a robot that starts its pause when the response arrives. **At about 100 ms the two ways of counting the same half
-second fall on either side of the edge.** A robot's pause, its RTT and its upload's size decide together, and a small
-change in any of them can move a link across.
+on the longest of the three longer links: that silence spans one timeout, not two. Here the 0.53 s is counted from the
+response, which matches a robot that starts its pause when the response arrives. **On that link the two ways of
+counting the same half second fall on either side of the edge.** A robot's pause, its RTT and its upload's size decide
+together, and a small change in any of them can move a link across.
 
 ## Larger uploads
 
@@ -3411,9 +3408,8 @@ round trips; in brackets, how many of the 20 took more than one.
 | 13.2 ms | 100 KB | **2.98 (20)** | 1.10 (0) | 1.08 (0) | 1.06 (0) |
 | 13.2 ms | 500 KB | **2.99 (20)** | 1.23 (1) | 1.24 (0) | 1.15 (0) |
 | 13.2 ms | 1 MB | **3.01 (20)** | 1.31 (1) | 1.36 (0) | 1.35 (8) |
-| 81.3 ms | 100 KB | **2.99 (20)** | 1.00 (0) | 1.00 (0) | 1.00 (0) |
-| 81.3 ms | 500 KB | **3.00 (20)** | 1.01 (0) | 1.01 (0) | 1.01 (0) |
-| 81.3 ms | 1 MB | **2.01 (20)** | 1.02 (0) | 1.01 (0) | 1.01 (0) |
+
+On a longer link the default took two to three round trips as well, and each of the others about one, at every size.
 
 At 13 ms, 1 MB takes over one round trip even with no pause at all: at that distance the time to push a megabyte
 through is no longer small beside the RTT. That is the link's rate, and none of these components changes it.
@@ -3432,7 +3428,8 @@ The 24 KB upload again, with `netem` dropping 1% of the robot's packets.
 | RTT | CUBIC, default | CUBIC, the client sends through the pause | BBR on the robot's socket |
 |---|---|---|---|
 | 22 ms | **2.00 (40 of 40)** | **2.00 (31 of 40)** | 1.01 (0 of 40) |
-| 101.5 ms | **2.00 (40 of 40)** | **2.00 (35 of 40)** | — |
+
+On a longer link with the same loss, both CUBIC columns took two round trips as well; BBR was not run there.
 
 **Under loss, BBR keeps the window.** BBR does not set its window by losses, and took no extra round trip at 22 ms.
 
@@ -3447,8 +3444,9 @@ trip in every row; with one, none did.
 |---|---|---|---|---|---|---|
 | 11.3 ms | **37.6 (3.3)** | 13.4 (1.2) | 12.7 (1.1) | 12.7 (1.1) | **38.1 (3.4)** | 13.9 (1.2) |
 | 21.4 ms | **44.4 (2.1)** | 23.5 (1.1) | 22.7 (1.1) | 23.7 (1.1) | **44.8 (2.1)** | 23.2 (1.1) |
-| 40.5 ms | **82.4 (2.0)** | 41.8 (1.0) | 41.8 (1.0) | 43.7 (1.1) | **82.8 (2.0)** | 42.3 (1.0) |
-| 80.5 ms | **163.8 (2.0)** | 82.8 (1.0) | 82.6 (1.0) | 87.1 (1.1) | **164.3 (2.0)** | 82.2 (1.0) |
+
+At 41 ms and on a longer link, an upload took two round trips as it is, over a WebSocket and over Zenoh, and one with
+any of the components.
 
 What these two columns are:
 
@@ -3462,30 +3460,31 @@ What these two columns are:
 
 One closed-loop run with openpi's own policy server (the `pi05_droid` checkpoint, on an L4) and openpi's own client,
 with and without `kept = openpi.keep(policy)`. The client ran in a Linux virtual machine (kernel 6.8, default settings,
-CUBIC) on a laptop on a home connection; its kernel measured a smoothed RTT of 38 to 66 ms and a retransmission timeout
+CUBIC) on a laptop on a home connection; its kernel measured a smoothed RTT from 38 ms up and a retransmission timeout
 of about 240 to 270 ms. Each request uploaded 301 KB, and each row is one 45 s episode. "Outside inference" is the time
 `policy.infer()` took on the client minus the inference time the server reported (about 195 ms).
 
-| Setting | Outside inference, p50 (p95) | Idle before a request, p50 | Uploads during which the window fell to about half | Retransmissions |
-|---|---|---|---|---|
-| As it is | **181.4** (237.1) ms | 346 ms | 86 of 89 | 25 |
-| As it is | **151.9** (223.5) ms | 378 ms | 85 of 89 | 58 |
-| `openpi.keep()` | 92.1 (132.9) ms | 65 ms | 0 of 89 | 0 |
-| `openpi.keep()`, BBR module loaded | 85.6 (109.8) ms | 80 ms | 3 of 90 | 9 |
-| `openpi.keep()`, BBR module loaded | 90.6 (136.3) ms | 78 ms | 2 of 90 | 25 |
+| Setting | Idle before a request, p50 | Uploads during which the window fell to about half | Retransmissions |
+|---|---|---|---|
+| As it is | 346 ms | **86 of 89** | 25 |
+| As it is | 378 ms | **85 of 89** | 58 |
+| `openpi.keep()` | 65 ms | 0 of 89 | 0 |
+| `openpi.keep()`, BBR module loaded | 80 ms | 3 of 90 | 9 |
+| `openpi.keep()`, BBR module loaded | 78 ms | 2 of 90 | 25 |
 
 Without `keep()` the connection was idle for longer than its retransmission timeout before almost every request, and the
 kernel reduced the congestion window before the upload. With `keep()` the idle time just before each request was under
-100 ms, and the window fell during 0 to 3 uploads in an episode. With the BBR module loaded as well (`sudo modprobe
-tcp_bbr`, after which `kept.bbr` is true), the time outside inference had a median of 85.6 and 90.6 ms.
+100 ms, the window fell during 0 to 3 uploads in an episode, and the time outside inference was about 40 to 50% shorter
+at the median. With the BBR module loaded as well (`sudo modprobe tcp_bbr`, after which `kept.bbr` is true), it was a
+little shorter still.
 
 A later run had a Linux cloud machine run openpi's own client (CUBIC, no BBR) 30 ms from openpi's own server (the
 `pi05_droid` checkpoint, on an L4), six 45 s episodes with and without `keep()`, 301 KB per request.
 
-| Robot | `keep()` | Window left, p50 (packets) | Outside inference, p50 |
+| Robot | `keep()` | Window left, p50 (packets) | Outside inference, p50, in round trips of 30 ms |
 |---|---|---|---|
-| 30 ms away | no | 72 | 91.2 ms |
-| 30 ms away | yes | 215 | 37.1 ms |
+| 30 ms away | no | 72 | about 3 |
+| 30 ms away | yes | 215 | about 1.2 |
 
 With openpi's own server on Linux, also load BBR (`sudo modprobe tcp_bbr`, which `keep()` then puts on the connection)
 so the window holds across a pause ([`window.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/window.py)).
@@ -3499,29 +3498,29 @@ pinging each connection every 100 ms and decoding the pictures as `openpi.patch(
 episode on the same GPU. "Outside the server" is the round trip the client measured minus the inference time the
 server reported; the RTT is a TCP echo to the GPU, measured during the episode.
 
-| Pictures | Upload per request | Outside the server, p50 (p95) | RTT, p50 | Frame to answer, p50 (p95) |
-|---|---|---|---|---|
-| Arrays | 301.5 KB | 153.8 (270.8) ms | 56.5 ms | 351.8 (468.0) ms |
-| JPEG, the server pinging | 18.8 KB | **58.1** (207.8) ms | 37.5 ms | 279.6 (429.6) ms |
+| Pictures | Upload per request | RTT, p50 |
+|---|---|---|
+| Arrays | 301.5 KB | 56.5 ms |
+| JPEG, the server pinging | 18.8 KB | 37.5 ms |
 
-The link was faster during the second episode, so take its RTT out: the time outside the server beyond one RTT fell
-from about 97 ms to about 21 ms.
+The link was faster during the second episode, so take its RTT out: the time outside the server beyond one RTT fell to
+about a fifth, to about 21 ms at the median.
 
 ## From a Linux client on a home connection
 
-An upload over a WebSocket 0.5 s after the previous response, 16 per cell: the median in milliseconds and, in brackets,
-in round trips of that row. The client was the same Linux virtual machine (kernel 6.8, default settings, CUBIC) on a
-laptop on a home connection, or the laptop itself (macOS). The server used the `websockets` library, and in the ping
-rows it pinged with `ping_interval=0.1`, which is what `ping.websockets_options()` sets.
+An upload over a WebSocket 0.5 s after the previous response, 16 per cell: the median, in round trips of that row. The
+client was the same Linux virtual machine (kernel 6.8, default settings, CUBIC) on a laptop on a home connection, or the
+laptop itself (macOS). The server used the `websockets` library, and in the ping rows it pinged with
+`ping_interval=0.1`, which is what `ping.websockets_options()` sets.
 
 | Client | RTT | 100 KB | 500 KB | 1 MB |
 |---|---|---|---|---|
-| Linux, as it is | 34.9 ms | **192.5 (5.5)** | 359.7 (10.3) | 467.0 (13.4) |
-| Linux, the server pings every 0.1 s | 35.0 ms | 59.8 (1.7) | 271.6 (7.8) | 445.2 (12.7) |
-| Linux, `tcp_slow_start_after_idle=0` | 29.1 ms | 57.7 (2.0) | 392.1 (13.5) | 465.4 (16.0) |
-| Linux, BBR on the client's socket | 30.6 ms | 60.0 (2.0) | 157.4 (5.1) | 255.5 (8.3) |
-| macOS, as it is | 34.2 ms | 89.4 (2.6) | 135.9 (4.0) | 229.2 (6.7) |
-| macOS, the server pings every 0.1 s | 33.1 ms | 89.5 (2.7) | 121.0 (3.7) | 247.2 (7.5) |
+| Linux, as it is | 34.9 ms | **5.5** | 10.3 | 13.4 |
+| Linux, the server pings every 0.1 s | 35.0 ms | 1.7 | 7.8 | 12.7 |
+| Linux, `tcp_slow_start_after_idle=0` | 29.1 ms | 2.0 | 13.5 | 16.0 |
+| Linux, BBR on the client's socket | 30.6 ms | 2.0 | 5.1 | 8.3 |
+| macOS, as it is | 34.2 ms | 2.6 | 4.0 | 6.7 |
+| macOS, the server pings every 0.1 s | 33.1 ms | 2.7 | 3.7 | 7.5 |
 
 At 100 KB the idle restart is the cost: with default settings the window was at 38 segments after 547 ms of idle time,
 and the ping, the kernel option and BBR each brought the upload to about two round trips. At 500 KB and 1 MB the line's
@@ -3537,8 +3536,8 @@ This is one home line, a virtual machine and 16 uploads per cell.
 - **One datacenter link** for the sections above the last three; those three are from one home connection.
 - **One pause.** 0.53 s after the response (0.5 s for the sizes). A robot that sends its next request sooner than its
   RTT plus 200 ms never takes the extra round trip; one that pauses for seconds has its window cut to its floor.
-- **One upload size for the first table.** At about 100 ms a 24 KB upload is at the boundary described above, and a
-  smaller or larger one may fall on the other side of it.
+- **One upload size for the first table.** On the longest of the three longer links a 24 KB upload is at the boundary
+  described above, and a smaller or larger one may fall on the other side of it.
 
 ## Repeat it
 
@@ -3893,13 +3892,14 @@ table_user = slack.measure(forward_of_user, sizes=[1, 2, 4])  # forward_of_user(
 play_user = slack.playback(hz=20, valid_len=15, replan_at=8)  # 15 valid steps, the next requested at the 8th
 seating_user = slack.Seating(table_user, play_user["buffer_s"] * 1000, sizes=[1, 2, 4],
                              cycle_ms=(play_user["play_s"] - play_user["buffer_s"]) * 1000)
-seats_user, over_user = seating_user.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
+seats_user, over_user = seating_user.seat([("near-1", 30.0), ("near-2", 30.0), ("near-3", 30.0), ("near-4", 30.0),
+                                           ("far", 60.0)])                        # (robot, its RTT in ms)
 ```
 
-With forward passes of 80, 110 and 130 ms this gives `(4, ["far"])`: the replica has capacity for four robots, and the
-one 200 ms away is the one to move to another replica: its request may arrive as the near robot's batch runs, and
-would then miss its deadline. A batch of four fits the buffer of a robot 100 ms away, and four such robots, run on a
-clock with these batch times, had every response in time.
+With forward passes of 80, 150 and 250 ms this gives `(4, ["far"])`: the replica has capacity for four robots, and the
+one 60 ms away is the one to move to another replica: its request may arrive as the near robots' batch runs, and
+would then miss its deadline. A batch of four fits the buffer of a robot 30 ms away, and the four near robots, run on
+a clock with these batch times, had every response in time.
 
 ```bash
 python examples/components/slack.py        # no model and no GPU: the rules on one pattern of arrivals
@@ -3919,10 +3919,10 @@ the margin before that.
   step k, counted from when the previous request was sent. At that moment (N - k) / hz of playback is left, and the
   robot sends a request every k / hz (the cycle). Nothing is declared per request and nothing is read from a response.
   If `replan_at` is not given, k = N: no buffer, and no slack.
-- **A request's deadline is its buffer, less its robot's RTT, less 50 ms.** The RTT is what the
-  robot reports with its request (`outside_ms`, an integer number of ms from 0 to 5000), and 100 ms for a robot that
-  reports nothing. A robot that sent its request late reports the playback time it has left (`left_ms`), and that
-  value is used in place of its buffer.
+- **A request's deadline is its buffer, less its robot's RTT, less 50 ms.** The RTT is what the robot reports with its
+  request (`outside_ms`, an integer number of ms from 0 to 5000), and a fixed RTT is assumed for a robot that reports
+  nothing. A robot that sent its request late reports the playback time it has left (`left_ms`), and that value is used
+  in place of its buffer.
 - **Batch times are measured, not estimated.** `measure` runs each listed size once untimed, then three times. `Table`
   keeps the latest 64 forward passes of each size: their p95 is what a batch is taken to last, for waiting decisions
   and on the clock, and their p50 is what it counts for in the load.
@@ -4039,7 +4039,7 @@ serving stack it was taken from.
   had no late response, 3 had 21% and 26%, and 4 had 99%. At 20 Hz (350 ms) it computed 1, and 2 robots had 40% and
   90% late. The server admitted every robot, so the cells above the capacity show what `seat()` prevents.
   `per_replica` then computed the load by a formula. On a clock, as now, those capacities are the same for robots
-  20 or 50 ms away; 100 ms away, the 15 Hz capacity is 1 (2 with `worst=False`).
+  20 or 50 ms away.
 - **The capacity, on three models.** One L4, simulated robots of a 15 Hz policy 20 ms away, 60 s per cell, with the load
   computed by that formula. For π0.5 and GR00T N1.6 it computed 2, and 2 robots had no late response (0.4% in one cell
   of eight). For SmolVLA (batches of 1, 2, 4 and 8 in 256, 273, 303 and 377 ms) it computed 8, and 4 robots had 95% and
@@ -4066,10 +4066,11 @@ serving stack it was taken from.
   deviation), two such robots had 6.4% of their responses late before, and 0.02% after. Two robots further apart ran
   120 s at a load of 0.95 with no late response in 445.
 - **Four robots on one replica for two minutes**: 20 Hz, 15 valid steps, the next request at the 8th (a 350 ms
-  buffer), a stand-in model on a CPU. With every robot assumed to have a fixed 100 ms RTT and a batch timed
+  buffer), a stand-in model on a CPU. With every robot assumed to have one fixed RTT and a batch timed
   by its forward pass alone, 459 of 1,114 responses arrived after their robot had run out of actions. A request
-  waited a median 58 ms for a batch, took 197 ms more in the server and about 131 ms outside it: 386 ms against 350.
-  Per-robot RTT and batch times as served were added because of that.
+  waited a median 58 ms for a batch and took 197 ms more in the server, and it spent longer outside the server than
+  the RTT assumed: in all, more than the 350 ms buffer. Per-robot RTT and batch times as served were added because of
+  that.
 - **Load.** Four robots, 300 s and about 2,100 requests per run: a stand-in on a CPU paced like a 15 Hz policy (15
   valid steps, the next request at the 8th: a 467 ms buffer, 533 ms between a robot's requests; batches of 1, 2 and 4
   in 234, 254 and 299 ms). All four on one replica, two batches of two in each 533 ms and a load of 0.95, had 85.7%
@@ -4078,12 +4079,12 @@ serving stack it was taken from.
 - **Capacity set by the furthest robot.** A replica that had capacity for four robots reported a capacity of one once
   a far robot was on it, and the three robots on it were not answered in time. Per-robot admission was added because
   of that.
-- **Dispatching a far robot separately**, a simulation of one replica (15 Hz, a 467 ms buffer, a batch of one
-  234 ms, 120 s per run): a robot 60 ms away, beside one 300 ms away, was answered in time 80% and 83% of the time in
-  two runs, and 88% and 92% once the far robot's request was dispatched separately. In a third run the replica was
-  too loaded for the two and neither was answered in time, either way.
+- **Dispatching a far robot separately**, a simulation of one replica (15 Hz, a 467 ms buffer, a batch of one 234 ms,
+  120 s per run): a robot 60 ms away, beside one much further away, was answered in time 80% and 83% of the time in two
+  runs, and 88% and 92% once the far robot's request was dispatched separately. In a third run the replica was too
+  loaded for the two and neither was answered in time, either way.
 - **A near robot behind a far robot's batch.** On a replica with two robots (15 Hz, a 467 ms buffer, batches of 1
-  and 2 in 230 and 250 ms), a robot 23 ms away beside one 250 ms further ran out of actions 31 times in 240 s, and
+  and 2 in 230 and 250 ms), a robot 23 ms away beside one much further away ran out of actions 31 times in 240 s, and
   not once alone. The one-step wait was added because of that; its effect afterwards is not recorded here.
 
 ## Where it helps
@@ -4102,7 +4103,7 @@ serving stack it was taken from.
 - **No slack, nothing to wait in.** A policy whose robot sends a request only when a chunk is fully executed (k = N)
   has no request held, and a replica serves one of its robots. `max_wait_s` changes that only by making the robot
   wait.
-- **Each robot reports its RTT**; without one, 100 ms is assumed.
+- **Each robot reports its RTT**; without one, a fixed RTT is assumed.
 - **One robot per replica** has nothing to batch with.
 - **A replica is filled to at most 0.9 of a cycle**, which keeps its responses from queuing.
 - **A request due at the very instant its batch must go.** Batch times, RTTs and a cycle that add up exactly leave
@@ -4125,7 +4126,6 @@ Sequences serves with. It has not been compared with either.
 | Constant | Value | What it is |
 |---|---|---|
 | `MARGIN_MS` | 50 | the margin kept between a response and its robot's deadline |
-| `ROUND_TRIP_MS` | 100 | the RTT assumed for a robot that has not reported its own |
 | `LOAD_MAX` | 0.9 | the largest share of a cycle a replica's batches may fill |
 | `MAX_ROBOTS_PER_REPLICA` | 64 | the most robots a replica serves, however fast it is |
 | `CLOCK_CYCLES`, `CLOCK_WARM` | 48, 8 | the cycles a start is run for on the clock, and how many of the first are not counted |
@@ -4236,10 +4236,11 @@ server that hands out no example. It exits 0 when no line says `no`.
   A ping on the stream is a WebSocket control frame: the server's WebSocket answers it on its own, and an act never
   waits for its answer.
 - **The policy's own thread.** A forward pass takes tens of milliseconds, and on the server's event loop it would hold
-  every ping and every upload for as long. With a 200 ms stand-in model and two robots, a ping's p50 was 153 ms with
-  the model on the event loop and 1.0 ms with it on its own thread. It does not make a robot's act faster: with one
-  policy, acts wait their turn either way (p50 316 ms against 320 ms in the same test). What serves several robots
-  sooner is batching. CUDA and JAX keep state per thread, so the policy always runs on the same one.
+  every ping and every upload for as long. With a 200 ms stand-in model and two robots, a ping waited for the forward
+  pass under way with the model on the event loop, and its p50 was 1.0 ms with the model on its own thread. It does not
+  make a robot's act faster: with one policy, acts wait their turn either way (p50 316 ms against 320 ms in the same
+  test). What serves several robots sooner is batching. CUDA and JAX keep state per thread, so the policy always runs on
+  the same one.
 - **Server time.** Without it, a slow model looks like a slow link to the robot.
 - **One write.** Behind a tunnel, a response written in two pieces took a round trip more:
   [`one_write.py`](https://github.com/General-Sequences/sequence-ai/blob/main/sequence_ai/network/one_write.py).
@@ -4365,7 +4366,7 @@ A robot sending a request every 0.53 s with 24 KB of frames (19 packets), 40 req
 kernels 6.8 and 7.0, an HTTP server, the RTT set with netem. Each cell is how many of the 40 requests took one extra
 round trip.
 
-| Setting on the robot | about 21 ms | about 101 ms | about 241 ms |
+| Setting on the robot | a short link, about 21 ms | a longer link | a much longer link |
 |---|---|---|---|
 | default | 40 of 40 | 0 of 40 | 0 or 1 of 40 |
 | `tcp_slow_start_after_idle=0` | 0 | 0 | 0 |
@@ -4380,21 +4381,21 @@ request size varied.
 
 **Why the short link took the extra round trip and the long ones did not.** The window is halved once for each timeout
 the connection sat idle, down to 10 packets. A 0.53 s pause spans two timeouts at an RTT of about 21 ms, so a window of
-29 packets became 10, and a 19-packet upload no longer fit in one flight. At about 101 and 241 ms the same pause spans
+29 packets became 10, and a 19-packet upload no longer fit in one flight. On the two longer links the same pause spans
 one timeout: 38 packets became 19, which just fits. A larger upload, or a longer pause, moves that line.
 
 **The same upload, with the half second counted from the response.** Measured again with the tool in
 [`bench/`](https://github.com/General-Sequences/sequence-ai/tree/main/bench), which waits 0.53 s after each response before it uploads again, between two cloud machines: every
-one of 40 uploads took one extra round trip at 12, 21, 41, 65, 81 and 101 ms, and none at 242 ms. With the server
-pinging, the client sending a byte, BBR on the robot's socket or the kernel option at 0, none took an extra round trip
-at any RTT. The table above had a fixed 0.53 s from the start of one upload to the start of the next: at about 101 ms
-that silence spans one timeout, and half a second after the response plus one RTT spans two. **At about 100 ms, how a
-robot's pause is counted decides whether it takes the extra round trip.**
+one of 40 uploads took one extra round trip at 12, 21 and 41 ms and on three longer links, and none on a much longer
+one. With the server pinging, the client sending a byte, BBR on the robot's socket or the kernel option at 0, none took
+an extra round trip at any RTT. The table above had a fixed 0.53 s from the start of one upload to the start of the
+next: on its longer link that silence spans one timeout, and half a second after the response plus one RTT spans two.
+**On such a link, how a robot's pause is counted decides whether it takes the extra round trip.**
 [What do the components save?](https://github.com/General-Sequences/sequence-ai/blob/main/docs/measurements.md) has the table.
 
 **Larger uploads.** After 500 ms of silence, uploads of 100 KB, 500 KB and 1 MB each took 3.0 round trips. With the
 server pinging every 100 ms they took 1.1, 1.1 and 1.25; sent one after another with no pause, 1.05, 1.1 and 1.3.
-Three machines of one cloud provider, RTTs of 11.7 and 69.2 ms, 20 samples per cell.
+Three machines of one cloud provider, RTTs of 11.7 ms and a longer one, 20 samples per cell.
 
 ## When it applies
 

@@ -65,7 +65,6 @@ INFO:     Waiting for application startup.
 INFO:     optimize: nothing turned on - the policy holds no torch module
 INFO:     Application startup complete.
 INFO:     warm-up: one observation took 0.3 ms, then 0.3 ms at the median of 3
-INFO:     seats 1 robot 100 ms away, each robot by the round trip it reports
 INFO:     ready
 ```
 

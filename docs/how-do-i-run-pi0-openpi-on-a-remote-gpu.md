@@ -161,18 +161,18 @@ server turns it back into the array the policy reads; `connect(url, pictures="ex
   `scripts/serve_policy.py` is (`tests/network/test_openpi_server.py`).
 - **Measured on a real link:** `keep()` on a WebSocket connection of the kind openpi's client
   holds (the `websockets` library on both ends, compression off, a stand-in for the client class), between two cloud
-  machines. A 100 KB upload 0.53 s after each response took 37.6, 44.4, 82.4 and 163.8 ms at round-trip times (RTTs) of
-  11, 21, 41 and 81 ms, and 12.7, 22.7, 41.8 and 82.6 ms with `keep()`: two to three round trips became one, on 40 of 40
-  uploads. [What do the network components save?](measurements.md) has the table.
+  machines. A 100 KB upload 0.53 s after each response took 37.6 and 44.4 ms at round-trip times (RTTs) of 11 and 21 ms,
+  and 12.7 and 22.7 ms with `keep()`. At those RTTs, at 41 ms and on a longer link, two to three round trips became one,
+  on 40 of 40 uploads. [What do the network components save?](measurements.md) has the table.
 - **Measured with openpi's own server and client:** one closed-loop run with π0.5 (`pi05_droid`) on an L4, the client in
-  a Linux virtual machine on a home connection, 301 KB per request. The time a request spent outside inference had a
-  median of 181 and 152 ms in two episodes without `keep()`; with it, 92 ms; with the BBR module loaded as well, 86 and
-  91 ms.
+  a Linux virtual machine on a home connection, 301 KB per request. The time a request spent outside inference was about
+  40 to 50% shorter at the median with `keep()` than in two episodes without it, and a little shorter still with the BBR
+  module loaded as well.
   [The table](measurements.md#openpikeep-with-openpis-own-server-and-client) has the idle times and the congestion
   window.
 - **Measured with openpi's own server and client, the pictures as JPEG:** one closed-loop run with π0.5 on an L4, the
   robot a simulated arm on a Mac on a home connection, the server pinging. Each request's upload went from 301.5 KB to
-  18.8 KB, and the time it spent outside the server, beyond one RTT, from about 97 to about 21 ms at the median.
+  18.8 KB, and the time it spent outside the server, beyond one RTT, fell to about a fifth: about 21 ms at the median.
   [The table](measurements.md#pictures-as-jpeg-with-openpis-own-server-and-client).
 
 ## What openpi already does

@@ -268,7 +268,7 @@ On Linux, `window.keep(sock)` is `False` until the kernel's BBR module is loaded
 
 What a network component saves depends on the link:
 
-- On round-trip times (RTTs) of about 101 and 241 ms, a robot sending a request every 0.53 s took no extra round trip
+- On two long links, a robot sending a request every 0.53 s took no extra round trip
   after its pauses with the default settings, so there was nothing for BBR or a ping to save.
 - On loopback, or between two machines on one switch, a round trip costs almost nothing, so saving one saves almost
   nothing.

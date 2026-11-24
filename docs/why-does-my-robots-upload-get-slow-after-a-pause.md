@@ -37,7 +37,7 @@ A robot sending a request every 0.53 s with 24 KB of frames (19 packets), 40 req
 kernels 6.8 and 7.0, an HTTP server, the RTT set with netem. Each cell is how many of the 40 requests took one extra
 round trip.
 
-| Setting on the robot | about 21 ms | about 101 ms | about 241 ms |
+| Setting on the robot | a short link, about 21 ms | a longer link | a much longer link |
 |---|---|---|---|
 | default | 40 of 40 | 0 of 40 | 0 or 1 of 40 |
 | `tcp_slow_start_after_idle=0` | 0 | 0 | 0 |
@@ -52,21 +52,21 @@ request size varied.
 
 **Why the short link took the extra round trip and the long ones did not.** The window is halved once for each timeout
 the connection sat idle, down to 10 packets. A 0.53 s pause spans two timeouts at an RTT of about 21 ms, so a window of
-29 packets became 10, and a 19-packet upload no longer fit in one flight. At about 101 and 241 ms the same pause spans
+29 packets became 10, and a 19-packet upload no longer fit in one flight. On the two longer links the same pause spans
 one timeout: 38 packets became 19, which just fits. A larger upload, or a longer pause, moves that line.
 
 **The same upload, with the half second counted from the response.** Measured again with the tool in
 [`bench/`](../bench/), which waits 0.53 s after each response before it uploads again, between two cloud machines: every
-one of 40 uploads took one extra round trip at 12, 21, 41, 65, 81 and 101 ms, and none at 242 ms. With the server
-pinging, the client sending a byte, BBR on the robot's socket or the kernel option at 0, none took an extra round trip
-at any RTT. The table above had a fixed 0.53 s from the start of one upload to the start of the next: at about 101 ms
-that silence spans one timeout, and half a second after the response plus one RTT spans two. **At about 100 ms, how a
-robot's pause is counted decides whether it takes the extra round trip.**
+one of 40 uploads took one extra round trip at 12, 21 and 41 ms and on three longer links, and none on a much longer
+one. With the server pinging, the client sending a byte, BBR on the robot's socket or the kernel option at 0, none took
+an extra round trip at any RTT. The table above had a fixed 0.53 s from the start of one upload to the start of the
+next: on its longer link that silence spans one timeout, and half a second after the response plus one RTT spans two.
+**On such a link, how a robot's pause is counted decides whether it takes the extra round trip.**
 [What do the components save?](measurements.md) has the table.
 
 **Larger uploads.** After 500 ms of silence, uploads of 100 KB, 500 KB and 1 MB each took 3.0 round trips. With the
 server pinging every 100 ms they took 1.1, 1.1 and 1.25; sent one after another with no pause, 1.05, 1.1 and 1.3.
-Three machines of one cloud provider, RTTs of 11.7 and 69.2 ms, 20 samples per cell.
+Three machines of one cloud provider, RTTs of 11.7 ms and a longer one, 20 samples per cell.
 
 ## When it applies
 

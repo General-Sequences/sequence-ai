@@ -101,8 +101,8 @@ python3 bench/client.py --host HOST --sizes 24k --idle-ms 530 --samples 40 --mod
 On Linux, as root, where the client sends from:
 
 ```bash
-sudo tc qdisc add dev eth0 root netem delay 80ms          # about 80 ms more on the round trip
-sudo tc qdisc change dev eth0 root netem delay 80ms loss 1%
+sudo tc qdisc add dev eth0 root netem delay 40ms          # about 40 ms more on the round trip
+sudo tc qdisc change dev eth0 root netem delay 40ms loss 1%
 sudo tc qdisc del dev eth0 root
 ```
 
@@ -110,7 +110,7 @@ sudo tc qdisc del dev eth0 root
 
 | Link | Upload | After 500 ms of silence | Server pinging every 100 ms | One after another |
 |---|---|---|---|---|
-| Three machines of one cloud provider, RTTs of 11.7 and 69.2 ms, 20 samples per cell | 100 KB | 3.0 round trips | 1.1 | 1.05 |
+| Three machines of one cloud provider, RTTs of 11.7 ms and a longer one, 20 samples per cell | 100 KB | 3.0 round trips | 1.1 | 1.05 |
 | the same | 500 KB | 3.0 | 1.1 | 1.1 |
 | the same | 1 MB | 3.0 | 1.25 | 1.3 |
 

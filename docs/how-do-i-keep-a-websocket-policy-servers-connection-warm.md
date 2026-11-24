@@ -89,10 +89,10 @@ round trips), and pings 250 ms apart did not (2.04). Anything from 25 to 190 ms 
 
 | Link | Upload | Without the ping | With it |
 |---|---|---|---|
-| Machines of one cloud provider, RTTs of 11.7 and 69.2 ms, 20 samples per cell | 100 KB after 500 ms of silence | 3.0 round trips | 1.1 |
+| Machines of one cloud provider, RTTs of 11.7 ms and a longer one, 20 samples per cell | 100 KB after 500 ms of silence | 3.0 round trips | 1.1 |
 | the same | 500 KB | 3.0 | 1.1 |
 | the same | 1 MB | 3.0 | 1.25 |
-| Two cloud machines, RTTs of 11, 21, 41 and 81 ms, 40 uploads per cell, over a WebSocket whose server has `ping.websockets_options()` | 100 KB, 0.53 s after each response | 3.3, 2.1, 2.0 and 2.0 round trips | 1.2, 1.1, 1.0 and 1.0 |
+| Two cloud machines, RTTs of 11, 21 and 41 ms and a longer one, 40 uploads per cell, over a WebSocket whose server has `ping.websockets_options()` | 100 KB, 0.53 s after each response | 3.3, 2.1, 2.0 and 2.0 round trips | 1.2, 1.1, 1.0 and 1.0 |
 
 A window that the pings do not fill still shrinks. BBR on the robot keeps that one: `window.keep(sock)`, or
 `connect()`. With 1% loss, BBR kept the window: none of 40 uploads took an extra round trip

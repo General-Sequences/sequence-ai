@@ -13,12 +13,13 @@ table_user = slack.measure(forward_of_user, sizes=[1, 2, 4])  # forward_of_user(
 play_user = slack.playback(hz=20, valid_len=15, replan_at=8)  # 15 valid steps, the next requested at the 8th
 seating_user = slack.Seating(table_user, play_user["buffer_s"] * 1000, sizes=[1, 2, 4],
                              cycle_ms=(play_user["play_s"] - play_user["buffer_s"]) * 1000)
-seats_user, over_user = seating_user.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
+seats_user, over_user = seating_user.seat([("near-1", 30.0), ("near-2", 30.0), ("near-3", 30.0), ("near-4", 30.0),
+                                           ("far", 60.0)])                        # (robot, its RTT in ms)
 ```
 
-With batches of 1, 2 and 4 that take 80, 110 and 130 ms, this gives `(4, ["far"])`: the replica has capacity for
-four robots, and the one 200 ms away is the one to move to another replica. `python examples/components/slack.py`
-prints that case with no model and no GPU.
+With batches of 1, 2 and 4 that take 80, 150 and 250 ms, this gives `(4, ["far"])`: the replica has capacity for
+four robots, and the one 60 ms away is the one to move to another replica. `python examples/components/slack.py`
+shows the same rules on a case of its own, with no model and no GPU.
 
 ## The limits
 
@@ -36,9 +37,9 @@ prints that case with no model and no GPU.
   requests. Past that, responses queue behind each other however the requests are batched.
 
 The first number of robots that fails ends the count: robots are admitted one at a time, so a replica reaches a
-number of robots through every smaller one. In the example above a batch of four fits the buffer of a robot 100 ms
-away (130 + 100 + 50 ms, within 350), and the capacity is four: on the clock four such robots have every response in
-time, and their batches fill no more than 0.68 of a cycle.
+number of robots through every smaller one. In the example above a batch of four fits the buffer of a robot 30 ms
+away (250 + 30 + 50 ms, within 350), and the capacity is four: on the clock the four near robots have every response
+in time, and their batches fill no more than 0.78 of a cycle.
 
 Each robot is evaluated by its own RTT. When every robot was evaluated by the furthest robot's RTT, one far robot
 lowered the batch size, and with it the capacity, of every near robot on the same replica.
@@ -82,4 +83,4 @@ One replica per GPU: one copy of the model answers all its robots, their request
 ## When it applies
 
 - A policy whose robots wait for each response leaves no slack, so its replica serves one robot.
-- Each robot reports its RTT; without one, 100 ms is assumed.
+- Each robot reports its RTT; without one, a fixed RTT is assumed.

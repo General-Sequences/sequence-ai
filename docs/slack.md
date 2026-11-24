@@ -14,13 +14,14 @@ table_user = slack.measure(forward_of_user, sizes=[1, 2, 4])  # forward_of_user(
 play_user = slack.playback(hz=20, valid_len=15, replan_at=8)  # 15 valid steps, the next requested at the 8th
 seating_user = slack.Seating(table_user, play_user["buffer_s"] * 1000, sizes=[1, 2, 4],
                              cycle_ms=(play_user["play_s"] - play_user["buffer_s"]) * 1000)
-seats_user, over_user = seating_user.seat([("near", 30.0), ("far", 200.0)])     # (robot, its RTT in ms)
+seats_user, over_user = seating_user.seat([("near-1", 30.0), ("near-2", 30.0), ("near-3", 30.0), ("near-4", 30.0),
+                                           ("far", 60.0)])                        # (robot, its RTT in ms)
 ```
 
-With forward passes of 80, 110 and 130 ms this gives `(4, ["far"])`: the replica has capacity for four robots, and the
-one 200 ms away is the one to move to another replica: its request may arrive as the near robot's batch runs, and
-would then miss its deadline. A batch of four fits the buffer of a robot 100 ms away, and four such robots, run on a
-clock with these batch times, had every response in time.
+With forward passes of 80, 150 and 250 ms this gives `(4, ["far"])`: the replica has capacity for four robots, and the
+one 60 ms away is the one to move to another replica: its request may arrive as the near robots' batch runs, and
+would then miss its deadline. A batch of four fits the buffer of a robot 30 ms away, and the four near robots, run on
+a clock with these batch times, had every response in time.
 
 ```bash
 python examples/components/slack.py        # no model and no GPU: the rules on one pattern of arrivals
@@ -40,10 +41,10 @@ the margin before that.
   step k, counted from when the previous request was sent. At that moment (N - k) / hz of playback is left, and the
   robot sends a request every k / hz (the cycle). Nothing is declared per request and nothing is read from a response.
   If `replan_at` is not given, k = N: no buffer, and no slack.
-- **A request's deadline is its buffer, less its robot's RTT, less 50 ms.** The RTT is what the
-  robot reports with its request (`outside_ms`, an integer number of ms from 0 to 5000), and 100 ms for a robot that
-  reports nothing. A robot that sent its request late reports the playback time it has left (`left_ms`), and that
-  value is used in place of its buffer.
+- **A request's deadline is its buffer, less its robot's RTT, less 50 ms.** The RTT is what the robot reports with its
+  request (`outside_ms`, an integer number of ms from 0 to 5000), and a fixed RTT is assumed for a robot that reports
+  nothing. A robot that sent its request late reports the playback time it has left (`left_ms`), and that value is used
+  in place of its buffer.
 - **Batch times are measured, not estimated.** `measure` runs each listed size once untimed, then three times. `Table`
   keeps the latest 64 forward passes of each size: their p95 is what a batch is taken to last, for waiting decisions
   and on the clock, and their p50 is what it counts for in the load.
@@ -160,7 +161,7 @@ serving stack it was taken from.
   had no late response, 3 had 21% and 26%, and 4 had 99%. At 20 Hz (350 ms) it computed 1, and 2 robots had 40% and
   90% late. The server admitted every robot, so the cells above the capacity show what `seat()` prevents.
   `per_replica` then computed the load by a formula. On a clock, as now, those capacities are the same for robots
-  20 or 50 ms away; 100 ms away, the 15 Hz capacity is 1 (2 with `worst=False`).
+  20 or 50 ms away.
 - **The capacity, on three models.** One L4, simulated robots of a 15 Hz policy 20 ms away, 60 s per cell, with the load
   computed by that formula. For π0.5 and GR00T N1.6 it computed 2, and 2 robots had no late response (0.4% in one cell
   of eight). For SmolVLA (batches of 1, 2, 4 and 8 in 256, 273, 303 and 377 ms) it computed 8, and 4 robots had 95% and
@@ -187,10 +188,11 @@ serving stack it was taken from.
   deviation), two such robots had 6.4% of their responses late before, and 0.02% after. Two robots further apart ran
   120 s at a load of 0.95 with no late response in 445.
 - **Four robots on one replica for two minutes**: 20 Hz, 15 valid steps, the next request at the 8th (a 350 ms
-  buffer), a stand-in model on a CPU. With every robot assumed to have a fixed 100 ms RTT and a batch timed
+  buffer), a stand-in model on a CPU. With every robot assumed to have one fixed RTT and a batch timed
   by its forward pass alone, 459 of 1,114 responses arrived after their robot had run out of actions. A request
-  waited a median 58 ms for a batch, took 197 ms more in the server and about 131 ms outside it: 386 ms against 350.
-  Per-robot RTT and batch times as served were added because of that.
+  waited a median 58 ms for a batch and took 197 ms more in the server, and it spent longer outside the server than
+  the RTT assumed: in all, more than the 350 ms buffer. Per-robot RTT and batch times as served were added because of
+  that.
 - **Load.** Four robots, 300 s and about 2,100 requests per run: a stand-in on a CPU paced like a 15 Hz policy (15
   valid steps, the next request at the 8th: a 467 ms buffer, 533 ms between a robot's requests; batches of 1, 2 and 4
   in 234, 254 and 299 ms). All four on one replica, two batches of two in each 533 ms and a load of 0.95, had 85.7%
@@ -199,12 +201,12 @@ serving stack it was taken from.
 - **Capacity set by the furthest robot.** A replica that had capacity for four robots reported a capacity of one once
   a far robot was on it, and the three robots on it were not answered in time. Per-robot admission was added because
   of that.
-- **Dispatching a far robot separately**, a simulation of one replica (15 Hz, a 467 ms buffer, a batch of one
-  234 ms, 120 s per run): a robot 60 ms away, beside one 300 ms away, was answered in time 80% and 83% of the time in
-  two runs, and 88% and 92% once the far robot's request was dispatched separately. In a third run the replica was
-  too loaded for the two and neither was answered in time, either way.
+- **Dispatching a far robot separately**, a simulation of one replica (15 Hz, a 467 ms buffer, a batch of one 234 ms,
+  120 s per run): a robot 60 ms away, beside one much further away, was answered in time 80% and 83% of the time in two
+  runs, and 88% and 92% once the far robot's request was dispatched separately. In a third run the replica was too
+  loaded for the two and neither was answered in time, either way.
 - **A near robot behind a far robot's batch.** On a replica with two robots (15 Hz, a 467 ms buffer, batches of 1
-  and 2 in 230 and 250 ms), a robot 23 ms away beside one 250 ms further ran out of actions 31 times in 240 s, and
+  and 2 in 230 and 250 ms), a robot 23 ms away beside one much further away ran out of actions 31 times in 240 s, and
   not once alone. The one-step wait was added because of that; its effect afterwards is not recorded here.
 
 ## Where it helps
@@ -223,7 +225,7 @@ serving stack it was taken from.
 - **No slack, nothing to wait in.** A policy whose robot sends a request only when a chunk is fully executed (k = N)
   has no request held, and a replica serves one of its robots. `max_wait_s` changes that only by making the robot
   wait.
-- **Each robot reports its RTT**; without one, 100 ms is assumed.
+- **Each robot reports its RTT**; without one, a fixed RTT is assumed.
 - **One robot per replica** has nothing to batch with.
 - **A replica is filled to at most 0.9 of a cycle**, which keeps its responses from queuing.
 - **A request due at the very instant its batch must go.** Batch times, RTTs and a cycle that add up exactly leave
@@ -246,7 +248,6 @@ Sequences serves with. It has not been compared with either.
 | Constant | Value | What it is |
 |---|---|---|
 | `MARGIN_MS` | 50 | the margin kept between a response and its robot's deadline |
-| `ROUND_TRIP_MS` | 100 | the RTT assumed for a robot that has not reported its own |
 | `LOAD_MAX` | 0.9 | the largest share of a cycle a replica's batches may fill |
 | `MAX_ROBOTS_PER_REPLICA` | 64 | the most robots a replica serves, however fast it is |
 | `CLOCK_CYCLES`, `CLOCK_WARM` | 48, 8 | the cycles a start is run for on the clock, and how many of the first are not counted |

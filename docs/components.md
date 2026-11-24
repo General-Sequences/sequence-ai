@@ -38,10 +38,10 @@ every request.
 
 - **BBR.** A robot sending a request every 0.53 s with 24 KB of frames, on a round-trip time (RTT) of about 21 ms: 40 of
   40 requests took one more round trip without it (21.5 ms), and none with it (0.5 to 3.0 ms).
-- **Where the pause cost nothing.** On RTTs of about 101 and 241 ms the same robot took no extra round trip
+- **Where the pause cost nothing.** On two much longer links the same robot took no extra round trip
   with the default settings (0 or 1 of 40 requests), until the link lost packets (38 to 40 of 40 at 1% loss) or the size
   of the request varied.
-- **A ping while idle.** On an RTT of 226 ms, 162 KB uploads 3 s apart took 303.6 ms to arrive without the
+- **A ping while idle.** On a long link, 162 KB uploads 3 s apart took over a round trip to arrive without the
   pings, and under 1 ms with them.
 
 A ping cannot keep a window that the pings do not fill; BBR, or `tcp_slow_start_after_idle=0`, keeps that one.
@@ -133,8 +133,8 @@ Your server is `seq serve`: it takes the robot's stream, and says so on every an
 on.
 
 **One connection, kept open.** This is one line in any client: create one `httpx.Client` and reuse it. Measured: a
-new connection for each call took a median 305.9 ms; one reused connection, 121.0 ms. The handshake was 184.9 ms per
-call. `connect()` keeps one.
+new connection for each call took about two and a half times as long, at the median, as one reused connection: the
+difference was the handshake, on every call. `connect()` keeps one.
 
 ## Server side
 
@@ -158,8 +158,8 @@ uvicorn.run(app_user, **ping.uvicorn_options())                                 
 A WebSocket library answers a ping with a pong by itself. A server that pings therefore makes the robot send a few
 bytes each interval, and the robot's kernel never counts the connection idle. Nothing changes on the robot.
 
-**Measured.** Between machines of one cloud provider, on RTTs of 11.7 and 69.2 ms, an upload after 500 ms of silence
-took 3.0 round trips; with the server pinging every 100 ms it took 1.1 (100 KB and 500 KB) and 1.25 (1 MB).
+**Measured.** Between machines of one cloud provider, on an RTT of 11.7 ms and on a longer one, an upload after 500 ms
+of silence took 3.0 round trips; with the server pinging every 100 ms it took 1.1 (100 KB and 500 KB) and 1.25 (1 MB).
 
 A server that answers one HTTP request with one response cannot send anything unsolicited. There the ping comes from the
 robot: `window.Warm`, or the same pings `connect()` sends on its own stream. [How do I keep a WebSocket policy server's connection
@@ -186,8 +186,8 @@ uvicorn.run(WholeResponse(app_user), http=one_write_http())
 uvicorn writes a response in pieces. A tunnel or proxy in front of the server can delay every piece after the first
 until the client has acknowledged the first, so each request takes one more round trip than necessary.
 
-**Measured.** Behind such a tunnel, with a TCP connect of p50 89.5 ms: headers then body, GET p50 189.7 ms; the same
-response in one write, 106.7 ms.
+**Measured.** Behind such a tunnel, counted in the time a TCP connect took there: headers then body, a GET took about
+two round trips at the median; the same response in one write, about one.
 
 `python examples/components/one_write.py` printed `response: b'ok'`.
 
@@ -248,7 +248,7 @@ A percentile is `None` until its window contains enough samples for it: the p99 
 `python examples/components/latency_stats.py` printed:
 
 ```text
-200 requests: p50 248 ms, p95 281 ms, p99 290 ms
+200 requests: p50 25 ms, p95 28 ms, p99 29 ms
 ```
 
 ## openpi and LeRobot

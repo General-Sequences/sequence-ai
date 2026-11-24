@@ -11,7 +11,7 @@ from sequence_ai.network.latency_stats import LatencyStats, now_us
 
 stats = LatencyStats(counters=["requests"], gauges=["clock_offset_us"], latencies=["request_us"])
 for _ in range(200):
-    stats.sample("request_us", random.gauss(250_000, 20_000))      # microseconds
+    stats.sample("request_us", random.gauss(25_000, 2_000))          # microseconds
     stats.count("requests")
 sent = now_us()                                                # a timestamp sent from another machine
 stats.since("request_us", sent)

@@ -43,8 +43,8 @@ python3 bench/client.py --host HOST          # the defaults
 To try other distances from one pair of machines, add delay or loss where the client sends from (Linux, root):
 
 ```bash
-sudo tc qdisc add dev eth0 root netem delay 80ms          # about 80 ms more on the round trip
-sudo tc qdisc change dev eth0 root netem delay 80ms loss 1%
+sudo tc qdisc add dev eth0 root netem delay 40ms          # about 40 ms more on the round trip
+sudo tc qdisc change dev eth0 root netem delay 40ms loss 1%
 sudo tc qdisc del dev eth0 root
 sudo sysctl -w net.ipv4.tcp_slow_start_after_idle=0       # the kernel setting the pause goes through
 sudo sysctl -w net.ipv4.tcp_no_metrics_save=1 && sudo ip tcp_metrics flush all    # between runs
@@ -56,7 +56,7 @@ These are the runs behind the numbers in the top-level README. Each states its c
 with them.
 
 **After a pause, an upload took three round trips; with a ping it took about one.** Three machines of one cloud
-provider, a near link of 11.7 ms and a far one of 69.2 ms, this tool, 20 samples per cell:
+provider, a near link of 11.7 ms and a far one, this tool, 20 samples per cell:
 
 | Upload | After 500 ms of silence | Server pinging every 100 ms | One after another |
 |---|---|---|---|
@@ -72,7 +72,7 @@ Anything from 25 to 190 ms apart measured the same.
 machines (kernels 6.8 and 7.0), an HTTP server, 24 KB per request, 40 requests per cell, the RTT set with netem. This
 was measured with an earlier tool; the first command above repeats it.
 
-| Setting | about 21 ms | about 101 ms | about 241 ms |
+| Setting | a short link, about 21 ms | a longer link | a much longer link |
 |---|---|---|---|
 | default | 40 of 40 requests took one extra round trip | 0 of 40 | 0 or 1 of 40 |
 | `tcp_slow_start_after_idle=0` | 0 | 0 | 0 |
@@ -106,9 +106,9 @@ library and Zenoh as openpi and LeRobot 0.7 do; they are not openpi's or LeRobot
 
 ## The run made with these tools
 
-On 2026-11-15 the three tools were run between two cloud machines 12 ms apart, with delay added up to 242 ms. A 24 KB
-upload after a 0.53 s pause took two round trips on 40 of 40 uploads at every RTT up to 101 ms, and one with the
-server's ping, the robot's ping, BBR on the robot's socket or the kernel option at 0. At 242 ms it took one either
-way. Over a WebSocket and over Zenoh, a 100 KB upload took two to three round trips as they are and one with the
+On 2026-11-15 the three tools were run between two cloud machines 12 ms apart, with delay added for longer links. A
+24 KB upload after a 0.53 s pause took two round trips on 40 of 40 uploads at every RTT but the longest, and one with
+the server's ping, the robot's ping, BBR on the robot's socket or the kernel option at 0. On the longest it took one
+either way. Over a WebSocket and over Zenoh, a 100 KB upload took two to three round trips as they are and one with the
 components. With 1% loss, BBR kept the window.
 [`docs/measurements.md`](../docs/measurements.md) has every table, the commands and the scope of these measurements.

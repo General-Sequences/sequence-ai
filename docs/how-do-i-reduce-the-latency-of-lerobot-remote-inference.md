@@ -34,9 +34,9 @@ other flags do.
   mode, the endpoints, discovery, shared memory and the connect timeout), so a transport setting written in the file
   stays.
 - **Measured on a real link:** two Zenoh peers on two cloud machines, one answering the
-  other's requests. A 100 KB request 0.53 s after each response took 38.1, 44.8, 82.8 and 164.3 ms at round-trip times
-  (RTTs) of 11, 21, 41 and 81 ms, and 13.9, 23.2, 42.3 and 82.2 ms with the file on both ends: two to three round trips
-  became one, on 40 of 40 requests. [What do the network components save?](measurements.md) has the table.
+  other's requests. A 100 KB request 0.53 s after each response took 38.1 and 44.8 ms at round-trip times (RTTs) of 11
+  and 21 ms, and 13.9 and 23.2 ms with the file on both ends. At those RTTs, at 41 ms and on a longer link, two to three
+  round trips became one, on 40 of 40 requests. [What do the network components save?](measurements.md) has the table.
 
 ## Try it
 

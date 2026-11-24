@@ -90,10 +90,11 @@ server that hands out no example. It exits 0 when no line says `no`.
   A ping on the stream is a WebSocket control frame: the server's WebSocket answers it on its own, and an act never
   waits for its answer.
 - **The policy's own thread.** A forward pass takes tens of milliseconds, and on the server's event loop it would hold
-  every ping and every upload for as long. With a 200 ms stand-in model and two robots, a ping's p50 was 153 ms with
-  the model on the event loop and 1.0 ms with it on its own thread. It does not make a robot's act faster: with one
-  policy, acts wait their turn either way (p50 316 ms against 320 ms in the same test). What serves several robots
-  sooner is batching. CUDA and JAX keep state per thread, so the policy always runs on the same one.
+  every ping and every upload for as long. With a 200 ms stand-in model and two robots, a ping waited for the forward
+  pass under way with the model on the event loop, and its p50 was 1.0 ms with the model on its own thread. It does not
+  make a robot's act faster: with one policy, acts wait their turn either way (p50 316 ms against 320 ms in the same
+  test). What serves several robots sooner is batching. CUDA and JAX keep state per thread, so the policy always runs on
+  the same one.
 - **Server time.** Without it, a slow model looks like a slow link to the robot.
 - **One write.** Behind a tunnel, a response written in two pieces took a round trip more:
   [`one_write.py`](../sequence_ai/network/one_write.py).
