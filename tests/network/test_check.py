@@ -116,6 +116,11 @@ def test_a_server_that_does_it_all_has_every_line_ok_with_its_own_example():
     assert "after each 100.0 ms of idle time" in idle and "until 60 s after its last observation or act" in idle
     assert "the server says it took" in got["server time"].detail and "GET /example" in got["first act"].detail
     assert not {"pictures as JPEG", "compression"} & set(got) and status == 0
+    # the network's own times are said with no number: the server's and an act's own are
+    assert got["round trip"].detail == "5 pings answered on a kept connection, and a TCP connect"
+    assert got["pings in inference"].detail.startswith("answered while the model ran (")
+    assert got["server time"].detail.endswith(" act; the rest was outside it, on the network and in this machine")
+    assert not any(" ms" in got[name].detail for name in ("round trip", "pings in inference"))
 
 
 def test_a_server_that_runs_its_model_in_its_event_loop_and_says_nothing_has_those_lines_no():
@@ -123,6 +128,7 @@ def test_a_server_that_runs_its_model_in_its_event_loop_and_says_nothing_has_tho
         rows, status = check.run(url, observation=observation(), pings=5)
     got = by_name(rows)
     assert got["pings in inference"].status == "no" and "held while the model ran" in got["pings in inference"].detail
+    assert "waited for the act" in got["pings in inference"].detail and " ms" not in got["pings in inference"].detail
     assert got["server time"].status == "no" and "no handler_ms" in got["server time"].detail
     assert got["server"].status == "ok" and "--observation" in got["first act"].detail and status == 1
 

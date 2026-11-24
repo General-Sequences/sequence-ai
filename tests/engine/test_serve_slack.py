@@ -189,7 +189,8 @@ def test_a_robot_is_seated_at_its_first_act_and_one_that_would_be_late_beside_it
     assert _refusal(again) == words
     assert words.startswith("this server cannot answer this robot within the 350 ms left of each answer as a robot "
                             "asks for the next (7 of 15 steps at 20 Hz) beside the 1 robot it serves, however their "
-                            "requests fall: this robot is 200 ms away (a batch takes 1: ")
+                            "requests fall, with this robot at the round trip it reports (a batch takes 1: ")
+    assert " ms away" not in words                                    # no robot's round trip as a number
     assert words.endswith("Serve it from a GPU nearer it, or from this one once the others have stopped: a robot gives "
                           "its place up 3 s after its last act")
     assert said["robots"] == 1
@@ -206,8 +207,9 @@ def test_no_robot_is_seated_by_putting_a_seated_one_out():
 
     far, near = _run(go())
     assert far[0] == 200                                              # an empty server seats a robot, however far
-    assert ("seated beside the 1 robot it serves, this robot, 20 ms away, would leave the one 200 ms away without its "
-            "answers within the 350 ms left") in _refusal(near)
+    assert ("seated beside the 1 robot it serves, this robot, at the round trip it reports, would leave one of them "
+            "without its answers within the 350 ms left") in _refusal(near)
+    assert " ms away" not in _refusal(near)
 
 
 def test_robots_that_report_no_round_trip_are_seated_as_robots_at_the_default_and_no_more_than_a_batch_holds():
@@ -226,6 +228,35 @@ def test_robots_that_report_no_round_trip_are_seated_as_robots_at_the_default_an
     a, b, c = _run(go())
     assert a[0] == 200 == b[0]
     assert _refusal(c).startswith("this server already serves 2 robots, as many as its largest batch holds (2)")
+
+
+def test_the_seats_and_a_robot_that_reports_no_round_trip_are_said_at_a_default_round_trip_with_no_number(caplog):
+    """The default round trip is what robots are counted at until they report their own: the seats line at the warm-up
+    and a refusal of a robot that reported none say it as a default, never as slack.ROUND_TRIP_MS's number. One act
+    at a time takes 150 ms here: a robot at the default is answered in time alone, and a second, asking as the first
+    one's act runs, is not."""
+    def slow(observations: list) -> list:
+        time.sleep({1: 0.150, 2: 0.250}[len(observations)])
+        return [{"actions": [[0.0] * 7] * 15} for _ in observations]
+
+    async def go():
+        app = App(slow, batch=[1, 2], example=OBSERVATION, **PLAY)
+        try:
+            await _ready(app)
+            return await _act(app, "a"), await _act(app, "b")
+        finally:
+            app.close()
+
+    with caplog.at_level("INFO", logger="sequence_ai.serve"):
+        a, b = _run(go())
+    said = [r.getMessage() for r in caplog.records if r.name == "sequence_ai.serve"]
+    seats = [line for line in said if line.startswith("seats ")]
+    assert seats == ["seats 1 robot at a default round trip, then each robot by the round trip it reports"]
+    assert a[0] == 200
+    words = _refusal(b)
+    assert ("however their requests fall, with this robot at a default round trip, having reported none (a batch "
+            "takes 1: ") in words
+    assert " ms away" not in words and f"{slack.ROUND_TRIP_MS:.0f} ms" not in words
 
 
 def test_an_act_that_names_no_robot_is_served_and_seats_nobody():
@@ -453,7 +484,7 @@ def test_four_robots_three_seated_and_answered_and_the_far_one_refused_with_why(
     # refused with why: late itself, or - where the machine's load stretched the batches - putting a seated robot out
     refused = robots["far"]["refused"] or ""
     assert ("cannot answer this robot within the 350 ms left" in refused
-            or "would leave the one 1" in refused and "ms away without its answers within the 350 ms left" in refused)
+            or "would leave one of them without its answers within the 350 ms left" in refused)
     seated = [robot for name, robot in robots.items() if name != "far"]
     batch_ms = out["server"]["batch_ms"]
     if any(robot["refused"] for robot in seated) and max(batch_ms.values(), default=0.0) > 100.0:

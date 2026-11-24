@@ -64,13 +64,13 @@ Against the [Quickstart](quickstart.md)'s server on a Mac, it printed:
 sequence-ai check: http://127.0.0.1:8000
 
   ok  server              sequence-ai 0.66.0, pid 68489, up 9 s, policy QuickstartPolicy_user.infer_user, no speed-up on; it answers /ping with 200 and takes the robot's stream (x-seq-stream/3)
-  ok  round trip          0.3 ms for a ping on a kept connection (median of 10); 0.0 ms for a TCP connect
+  ok  round trip          10 pings answered on a kept connection, and a TCP connect
   ok  send window         macOS keeps a connection's send window through pauses
   --  BBR                 macOS has no BBR, and needs none for the window
   --  Wi-Fi power saving  not checked: macOS gives nothing to read it from; this machine's requests go over Wi-Fi (en0), and a wired connection takes the question away
   ok  pings when idle     connect() pings after each 100.0 ms of idle time, and the server answers /ping with 200: the pings go on the robot's stream, from its first observation until 60 s after its last observation or act, and keep the connection, and the Wi-Fi radio, from going idle
-  ok  pings in inference  answered while the model ran: 0.4 ms against 0.3 ms idle (3 pings in 3 acts)
-  ok  server time         the server says it took 0.3 ms of a 1.7 ms act: 1.4 ms outside it, on the network and in this machine
+  ok  pings in inference  answered while the model ran (3 pings in 3 acts)
+  ok  server time         the server says it took 0.3 ms of a 1.7 ms act; the rest was outside it, on the network and in this machine
   ok  first act           108.3 ms, the next ones 1.7 ms (observation from GET /example)
 ```
 

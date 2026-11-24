@@ -14,10 +14,10 @@ import itertools
 
 from sequence_ai.engine import slack
 
-FORWARD_S = {1: 0.080, 2: 0.110, 4: 0.130}                    # one forward pass of 1, 2 and 4 requests
+FORWARD_S = {1: 0.140, 2: 0.160, 4: 0.190}                    # one forward pass of 1, 2 and 4 requests
 SIZES = sorted(FORWARD_S)
-RTT_MS = {"near-1": 30.0, "near-2": 30.0, "far": 200.0}       # ms each robot's requests spend outside the server
-ARRIVES_S = {"near-1": 0.0, "far": 0.020, "near-2": 0.060}    # when each robot's request arrives, every round
+RTT_MS = {"near-1": 10.0, "near-2": 10.0, "far": 60.0}        # ms each robot's requests spend outside the server
+ARRIVES_S = {"near-1": 0.0, "far": 0.005, "near-2": 0.040}    # when each robot's request arrives, every round
 clock = [0.0]
 
 
@@ -26,7 +26,7 @@ def forward_of(n: int) -> None:
 
 
 table = slack.measure(forward_of, sizes=SIZES, clock=lambda: clock[0])       # with a real model: no `clock`
-play = slack.playback(hz=20, valid_len=15, replan_at=8)       # 15 valid steps per chunk, the next requested at the 8th
+play = slack.playback(hz=20, valid_len=14, replan_at=8)       # 14 valid steps per chunk, the next requested at the 8th
 buffer_ms, cycle_ms = play["buffer_s"] * 1000, (play["play_s"] - play["buffer_s"]) * 1000
 seating = slack.Seating(table, buffer_ms, sizes=SIZES, cycle_ms=cycle_ms)
 
@@ -100,7 +100,7 @@ def show(title: str, batches: list) -> None:
 
 
 if __name__ == "__main__":
-    print("A policy at 20 Hz, 15 valid steps per chunk, the next requested at the 8th:")
+    print("A policy at 20 Hz, 14 valid steps per chunk, the next requested at the 8th:")
     print(f"A buffer of {buffer_ms:.0f} ms when a robot sends its request, a request every {cycle_ms:.0f} ms. "
           f"Batches of {SIZES} take {[round(table.p95(n)) for n in SIZES]} ms.\n")
     for name, rtt in RTT_MS.items():

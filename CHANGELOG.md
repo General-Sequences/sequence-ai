@@ -3,6 +3,16 @@
 What changed in each release of SequenceLink's package, `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
+## 0.66.3 — 2026-11-24
+
+`seq serve` and `sequence_ai.check` say a round trip in words where they printed milliseconds.
+
+### Changed
+
+- `seq serve` counts a robot at the default round trip until the robot reports its own, and says so without a number.
+- `sequence_ai.check` says its round trip, its pings and its server time in words.
+- The docs and the component examples say longer links in words.
+
 ## 0.66.2 — 2026-11-22
 
 The platform's names on `seq` and `sequence_ai` come from sequence-cloud even where an older release's files were
