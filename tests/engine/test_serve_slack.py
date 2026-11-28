@@ -30,6 +30,7 @@ from sequence_ai.engine import serve as serving
 from sequence_ai.engine import slack
 from sequence_ai.engine.serve import NOT_SEATED, App
 from sequence_ai.network import msgpack_io
+from tests.engine import _clock
 
 pytest.importorskip("sequence_base")         # serve() takes each robot's stream, which needs sequence-base
 
@@ -156,9 +157,19 @@ def test_an_answer_with_fewer_steps_than_a_robot_plays_of_each_is_warned_of_at_t
                     []]
 
 
-def test_the_warm_up_times_each_size_as_slack_measure_does_and_ping_says_how_robots_play_and_the_seats():
+def test_the_warm_up_times_each_size_as_slack_measure_does_and_ping_says_how_robots_play_and_the_seats(monkeypatch):
+    # the stand-in's batches take their time on the clock serve() times them with (tests/engine/_clock.py), so what
+    # /ping says of each size is the policy's own time exactly - a sleep of 80 ms lasted 151 on a loaded machine, and
+    # the warm-up measured it as it was
+    clock = _clock.Clock()
+    monkeypatch.setattr(importlib.import_module("sequence_ai.engine.serve"), "time", _clock.TimeWith(clock.counted))
+
+    def timed(observations: list) -> list:
+        clock.wait(TIMES[len(observations)])
+        return [{"actions": [[0.0] * 7] * 15} for _ in observations]
+
     async def go():
-        app = _app()
+        app = App(timed, batch=sorted(TIMES), example=OBSERVATION, **PLAY)
         try:
             return await _ready(app), app._fleet.table
         finally:
@@ -169,7 +180,7 @@ def test_the_warm_up_times_each_size_as_slack_measure_does_and_ping_says_how_rob
     assert said["robots"] == 0 and said["seats"] == 2                 # two robots 100 ms away, at most its largest size
     assert table.sizes() == [1, 2] and sorted(table.first_ms) == [1, 2]
     assert table.as_dict()["1"]["n"] == slack.RUNS == table.as_dict()["2"]["n"]
-    assert 80 <= said["batch_ms"]["1"] < 120 and 110 <= said["batch_ms"]["2"] < 150
+    assert said["batch_ms"] == {"1": 80.0, "2": 110.0}               # each size's time, the stand-in's own (TIMES)
 
 
 # ── seats ─────────────────────────────────────────────────────────────────────────────────────────────────────────────

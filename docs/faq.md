@@ -9,7 +9,6 @@ Network layer (`sequence_ai.network`):
 - [Installing](#installing)
 - [Connecting](#connecting)
 - [Sending and reading](#sending-and-reading)
-- [With openpi and LeRobot](#with-openpi-and-lerobot)
 - [On the server](#on-the-server)
 - [What a component reports about your machine](#what-a-component-reports-about-your-machine)
 - [A network component made nothing faster](#a-network-component-made-nothing-faster)
@@ -46,8 +45,7 @@ array the server sent comes back as nested lists:
 ### `ImportError: resizing a frame requires Pillow, which is not installed`
 
 Pillow is a dependency of `sequence-ai`. The error appears where `frames.py` was copied into a project that has no
-Pillow: `pip install pillow`. `frames.resize_image`, `frames.encode` and `frames.decode` use Pillow, and
-`openpi.image_tools` and `openpi.patch()` through them; no other component does.
+Pillow: `pip install pillow`. `frames.resize_image`, `frames.encode` and `frames.decode` use Pillow; no other component does.
 
 ```text
 ImportError: resizing a frame requires Pillow, which is not installed: pip install pillow
@@ -60,7 +58,7 @@ The first line is what `frames.resize_image` raises, the second what `frames.enc
 
 | You use | Install |
 |---|---|
-| `connect()` on the robot, `frames`, `window`, `ping`, `tcp_link`, `one_write` under uvicorn, `wifi_power`, `msgpack_io`, `latency_stats`, `lerobot`, every inference component, numpy arrays in observations or responses | `sequence-ai`, nothing more |
+| `connect()` on the robot, `frames`, `window`, `ping`, `tcp_link`, `one_write` under uvicorn, `wifi_power`, `msgpack_io`, `latency_stats`, every inference component, numpy arrays in observations or responses | `sequence-ai`, nothing more |
 | `seq serve`, and the quick start's server | `sequence-ai`, on Python 3.10 or later |
 | `sequence_ai.Video`, `Depth` and `Tactile`, and pictures sent as video keyframes, `connect()`'s default | `sequence-ai`, on Python 3.10 or later; on 3.9, pictures go as they are |
 | `bench/`, the measuring tool | a checkout of the repository; `client.py` and `server.py` are standard library only, `ws_bench.py` needs `websockets` and `zenoh_bench.py` `eclipse-zenoh` |
@@ -132,58 +130,6 @@ refused on purpose: reading one back would run code the sender chose.
 sequence_ai.errors.InvalidRequest: observe(): this observation cannot be sent - set cannot be sent as msgpack (JSON values, bytes and numpy arrays can)
 sequence_ai.errors.InvalidRequest: observe(): this observation cannot be sent - a numpy array of dtype object is not carried: only plain numeric, bool and string dtypes are
 ```
-
-## With openpi and LeRobot
-
-### `TypeError: this client keeps no WebSocket connection at _ws`
-
-`openpi.keep()` takes openpi's own `WebsocketClientPolicy`, which holds its connection at `_ws`. Pass that object,
-and not a wrapper around it such as an `ActionChunkBroker`.
-
-```text
-TypeError: this client keeps no WebSocket connection at `_ws` (openpi_client's WebsocketClientPolicy does): nothing to keep warm
-```
-
-### `ModuleNotFoundError: No module named 'openpi_client'`
-
-Install openpi's client from openpi's repository (`packages/openpi-client`, `pip install -e .`).
-`sequence_ai.network.openpi` adds to that client and does not replace it.
-
-```text
-ModuleNotFoundError: No module named 'openpi_client'
-```
-
-### `ModuleNotFoundError: No module named 'typing_extensions'` on importing `openpi_client`
-
-`pip install typing_extensions`. openpi-client 0.1.0 imports it without listing it as a dependency, so a new
-environment that contains only openpi's client may lack it; inside openpi's own environment it is already there.
-
-```text
-ModuleNotFoundError: No module named 'typing_extensions'
-```
-
-### My openpi client prints nothing and never returns
-
-It is waiting for the server. While the connection is refused, openpi's client retries it every 5 seconds, and logs
-`Waiting for server at ...` and `Still waiting for server...` at INFO level, which is hidden unless logging is set
-up. So the server is not up yet, or the port is wrong. This is read from openpi's source
-(`websocket_client_policy.py`); it was not made to happen here.
-
-### `BBR on its socket: False`
-
-Expected anywhere but Linux, and on Linux until the BBR module is loaded: `sudo modprobe tcp_bbr`. The keepalive
-options and the ping while idle are on either way. On this Mac:
-
-```text
-BBR on its socket: False; TCP keepalive options accepted: 4
-```
-
-### Does the LeRobot setting need to be applied on both sides?
-
-Yes, each side sends its own keep-alive frames. In LeRobot 0.7.0 the policy server reads it from `zenoh.config_file`
-and the robot's remote inference from `zenoh_config_path`. Both names are from LeRobot's source; the file has not been
-tested with LeRobot's own client and server. See
-[How do I reduce the latency of LeRobot remote inference?](how-do-i-reduce-the-latency-of-lerobot-remote-inference.md)
 
 ## On the server
 
@@ -425,9 +371,8 @@ No. `cuda_graphs` keeps a graph only when its output equals eager mode's byte fo
 call the output your model produced for it. `replicas` and `slack` do not modify the model. No network component
 touches the model, and `compress` is lossless: the server gets back the bytes the robot built.
 `frames.resize_image` and `frames.encode` do change pixels, which is their purpose, and only where you call them: the
-resize mode and filter have no default, so you name the ones your policy was trained with. `openpi.image_tools` resizes
-as openpi's own does and then sends JPEG, and a server started through `sequence_ai.network.openpi` hands the policy the
-JPEG's pixels: at quality 95 they moved a π0.5 policy's actions by 5.9% on average over 50 real observations, about a
+resize mode and filter have no default, so you name the ones your policy was trained with. Sent as JPEG at quality 95
+(`frames.encode`), a picture's pixels moved a π0.5 policy's actions by 5.9% on average over 50 real observations, about a
 tenth of what the policy's own sampling noise moves them.
 
 ### Do I need a GPU to try it?

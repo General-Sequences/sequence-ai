@@ -115,19 +115,3 @@ def test_the_quickstart_robot_plays_its_servers_answers():
         server.terminate()
         server.wait(10)
 
-
-def test_the_openpi_quickstart_keeps_openpis_own_client():
-    for need in ("openpi_client", "websockets", "numpy"):
-        if importlib.util.find_spec(need) is None:
-            pytest.skip(f"needs {need}")
-    done = _run(EXAMPLES / "quickstart_openpi.py")
-    assert done.returncode == 0, done.stderr[-2000:]
-    assert "infer 2: a chunk of 10 actions" in done.stdout and "pings answered while it was idle:" in done.stdout
-
-
-def test_the_lerobot_quickstart_writes_the_setting(tmp_path):
-    done = subprocess.run([sys.executable, str(EXAMPLES / "quickstart_lerobot.py")], capture_output=True, text=True,
-                          timeout=60, cwd=tmp_path, env=ENV)          # it writes its file where it is run
-    assert done.returncode == 0, done.stderr[-2000:]
-    assert '"keep_alive": 100' in (tmp_path / "zenoh-keep-alive.json5").read_text()
-    assert "zenoh.config_file" in done.stdout and "zenoh_config_path" in done.stdout

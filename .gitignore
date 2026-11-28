@@ -3,5 +3,3 @@ dist/
 build/
 *.egg-info/
 __pycache__/
-# what examples/quickstart_lerobot.py writes where it is run
-zenoh-keep-alive.json5

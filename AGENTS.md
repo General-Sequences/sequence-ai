@@ -22,17 +22,14 @@ uv pip install -e ".[dev]"
 
 The suite is the components' own. It runs in about a minute and needs no network and no GPU: the `cuda_graphs` and
 `optimize` tests substitute a fake graph for the GPU's, and the `replicas` tests start real processes. `examples/check_on_a_gpu.py` runs
-the capture on a real GPU. One test reads Linux's `TCP_INFO` and skips itself elsewhere, and two are skipped unless
-openpi-client is installed (`tests/network/test_openpi.py` and one of `tests/network/test_examples.py`): it needs numpy
-below 2, which the rest of the development dependencies do not.
+the capture on a real GPU. One test reads Linux's `TCP_INFO` and skips itself elsewhere.
 
 ## Layout
 
 - `sequence_ai/engine/<component>.py` and `sequence_ai/network/<component>.py`: one component, one file. Its tests are
   `tests/engine/test_<component>.py` or `tests/network/test_<component>.py`, and its runnable example is
   `examples/components/<component>.py`.
-- `sequence_ai/network/openpi.py`, `sequence_ai/engine/serve.py` and `sequence_ai/engine/optimize.py` combine
-  components; they are the only files that import other components, besides `fp8.py`, which applies its layers with
+- `sequence_ai/engine/serve.py` and `sequence_ai/engine/optimize.py` combine components; they are the only files that import other components, besides `fp8.py`, which applies its layers with
   `fused.py`'s patches. `optimize`'s switches are `cuda_graphs.py`, `xla.py`, `compiled.py`, `fused.py` and `fp8.py`.
 - `bench/`: the tool that measures a link. Standard library only; it imports nothing from the package.
 - `examples/`: `quickstart_policy/` and `quickstart_robot.py` are the quickstart, a policy served with `seq serve` and

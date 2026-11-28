@@ -58,7 +58,7 @@ class Pi05DroidBatched_user:
 ```
 
 `load_policy_user()` makes openpi's trained policy from its downloaded checkpoint, as
-[How do I run π0 (openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md#or-serve-the-policy-as-a-class)
+[How do I run π0 (openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md)
 shows.
 
 In a server of your own, a handler around the model's batched call does the same:
@@ -93,10 +93,9 @@ Run one replica per GPU: one copy of the model answers all its robots in one pas
 
 ## The connection to the robot
 
-The inference components run on the server. For the link between the robot and the GPU, with openpi's own client or
-LeRobot's remote inference kept as they are, the network layer adds one line on openpi's client ([How do I run π0
-(openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md)) or one Zenoh setting for LeRobot ([How do I
-reduce the latency of LeRobot remote inference?](how-do-i-reduce-the-latency-of-lerobot-remote-inference.md)).
+The inference components run on the server. For the link between the robot and the GPU, serve the policy with
+`seq serve` and connect the robot with `sequence_ai.connect()`, and [what is on by default](what-is-on-by-default.md) is
+on that connection ([How do I run π0 (openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md)).
 
 ## When it applies
 

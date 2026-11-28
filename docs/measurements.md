@@ -2,11 +2,10 @@
 
 On a clean link between two cloud machines, an upload that follows a robot's half-second pause took two to three round
 trips with the defaults, and one with any of the components that keep the connection from going idle. That held over
-plain TCP, over a WebSocket and over Zenoh, at every round-trip time (RTT) measured from 11 ms up but the longest, where
+plain TCP and over a WebSocket, at every round-trip time (RTT) measured from 11 ms up but the longest, where
 the pause cost nothing; under 1% packet loss, BBR kept the window.
 
-The TCP, WebSocket and Zenoh sections were measured on 2026-11-15 with [`bench/`](../bench/), as released; the openpi
-sections with openpi's own server and client. It is one pair of machines
+The TCP, WebSocket and Zenoh sections were measured on 2026-11-15 with [`bench/`](../bench/), as released. It is one pair of machines
 on one night. **It is not a promise for your link:**
 [measure yours](how-do-i-measure-the-link-between-my-robot-and-my-gpu.md).
 
@@ -99,71 +98,19 @@ A 100 KB upload 0.53 s after each response, 40 per cell, on a connection first w
 median in milliseconds and, in brackets, in round trips. Without a component, 40 of 40 uploads took more than one round
 trip in every row; with one, none did.
 
-| RTT | WebSocket, as it is | The server pings ([`ping`](../sequence_ai/network/ping.py)) | The client keeps it warm ([`openpi.keep`](../sequence_ai/network/openpi.py)) | BBR alone on the robot's socket | Zenoh, as it is | Zenoh with the keep-alive file ([`lerobot`](../sequence_ai/network/lerobot.py)) |
-|---|---|---|---|---|---|---|
-| 11.3 ms | **37.6 (3.3)** | 13.4 (1.2) | 12.7 (1.1) | 12.7 (1.1) | **38.1 (3.4)** | 13.9 (1.2) |
-| 21.4 ms | **44.4 (2.1)** | 23.5 (1.1) | 22.7 (1.1) | 23.7 (1.1) | **44.8 (2.1)** | 23.2 (1.1) |
+| RTT | WebSocket, as it is | The server pings ([`ping`](../sequence_ai/network/ping.py)) | BBR alone on the robot's socket | Zenoh, as it is |
+|---|---|---|---|---|
+| 11.3 ms | **37.6 (3.3)** | 13.4 (1.2) | 12.7 (1.1) | **38.1 (3.4)** |
+| 21.4 ms | **44.4 (2.1)** | 23.5 (1.1) | 23.7 (1.1) | **44.8 (2.1)** |
 
-At 41 ms and on a longer link, an upload took two round trips as it is, over a WebSocket and over Zenoh, and one with
-any of the components.
+At 41 ms and on a longer link, an upload took two round trips as it is, over a WebSocket and over Zenoh, and one over
+a WebSocket with either component.
 
-What these two columns are:
+What the columns are:
 
 - **The WebSocket rows use the `websockets` library on both ends**, the library openpi's server and client are built on,
-  with compression off as openpi has it. `openpi.keep()` ran on a stand-in for openpi's client: an object with the two
-  members `keep()` uses, the connection and `infer`. In the `openpi.keep` column the machine had no BBR to give, so what kept the window was the ping.
-- **The Zenoh rows are two Zenoh peers**, one answering the other's requests, with and without the file
-  `lerobot.keep_alive_file()` writes, given to both.
-
-## `openpi.keep()` with openpi's own server and client
-
-One closed-loop run with openpi's own policy server (the `pi05_droid` checkpoint, on an L4) and openpi's own client,
-with and without `kept = openpi.keep(policy)`. The client ran in a Linux virtual machine (kernel 6.8, default settings,
-CUBIC) on a laptop on a home connection; its kernel measured a smoothed RTT from 38 ms up and a retransmission timeout
-of about 240 to 270 ms. Each request uploaded 301 KB, and each row is one 45 s episode. "Outside inference" is the time
-`policy.infer()` took on the client minus the inference time the server reported (about 195 ms).
-
-| Setting | Idle before a request, p50 | Uploads during which the window fell to about half | Retransmissions |
-|---|---|---|---|
-| As it is | 346 ms | **86 of 89** | 25 |
-| As it is | 378 ms | **85 of 89** | 58 |
-| `openpi.keep()` | 65 ms | 0 of 89 | 0 |
-| `openpi.keep()`, BBR module loaded | 80 ms | 3 of 90 | 9 |
-| `openpi.keep()`, BBR module loaded | 78 ms | 2 of 90 | 25 |
-
-Without `keep()` the connection was idle for longer than its retransmission timeout before almost every request, and the
-kernel reduced the congestion window before the upload. With `keep()` the idle time just before each request was under
-100 ms, the window fell during 0 to 3 uploads in an episode, and the time outside inference was about 40 to 50% shorter
-at the median. With the BBR module loaded as well (`sudo modprobe tcp_bbr`, after which `kept.bbr` is true), it was a
-little shorter still.
-
-A later run had a Linux cloud machine run openpi's own client (CUBIC, no BBR) 30 ms from openpi's own server (the
-`pi05_droid` checkpoint, on an L4), six 45 s episodes with and without `keep()`, 301 KB per request.
-
-| Robot | `keep()` | Window left, p50 (packets) | Outside inference, p50, in round trips of 30 ms |
-|---|---|---|---|
-| 30 ms away | no | 72 | about 3 |
-| 30 ms away | yes | 215 | about 1.2 |
-
-With openpi's own server on Linux, also load BBR (`sudo modprobe tcp_bbr`, which `keep()` then puts on the connection)
-so the window holds across a pause ([`window.py`](../sequence_ai/network/window.py)).
-
-## Pictures as JPEG with openpi's own server and client
-
-One closed-loop run with openpi's own policy server (the `pi05_droid` checkpoint, on an L4) and openpi's own client,
-the robot a simulated arm on a Mac on a home connection, two pictures of 224 x 224 in each request: first as arrays, as
-openpi's guide sends them, then as JPEG, each fitted and encoded as `openpi.image_tools` does it, with the server
-pinging each connection every 100 ms and decoding the pictures as `openpi.patch()` makes it do. Each row is one 45 s
-episode on the same GPU. "Outside the server" is the round trip the client measured minus the inference time the
-server reported; the RTT is a TCP echo to the GPU, measured during the episode.
-
-| Pictures | Upload per request | RTT, p50 |
-|---|---|---|
-| Arrays | 301.5 KB | 56.5 ms |
-| JPEG, the server pinging | 18.8 KB | 37.5 ms |
-
-The link was faster during the second episode, so take its RTT out: the time outside the server beyond one RTT fell to
-about a fifth, to about 21 ms at the median.
+  with compression off as openpi has it.
+- **The Zenoh column is two Zenoh peers**, one answering the other's requests, each with Zenoh's default settings.
 
 ## From a Linux client on a home connection
 
@@ -205,7 +152,7 @@ On the server side:
 ```bash
 python3 bench/server.py --port 9000
 python3 bench/ws_bench.py server 9101 & python3 bench/ws_bench.py server 9102 --ping
-python3 bench/zenoh_bench.py server 7447 & python3 bench/zenoh_bench.py server 7448 --keep
+python3 bench/zenoh_bench.py server 7447
 ```
 
 On the client side (Linux, as root for the first three lines):
@@ -223,10 +170,8 @@ python3 bench/client.py --host HOST --modes stream --stream 30x50k,10x100k --sec
 
 python3 bench/ws_bench.py client HOST 9101 plain              # as it is
 python3 bench/ws_bench.py client HOST 9102 plain              # the server pings
-python3 bench/ws_bench.py client HOST 9101 keep               # openpi.keep on the client side
 python3 bench/ws_bench.py client HOST 9101 bbr                # BBR alone
 python3 bench/zenoh_bench.py client HOST 7447                 # as it is
-python3 bench/zenoh_bench.py client HOST 7448 --keep          # the keep-alive file on both ends
 ```
 
 The kernel option's column is the first command again after `sysctl -w net.ipv4.tcp_slow_start_after_idle=0`.

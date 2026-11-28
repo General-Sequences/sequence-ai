@@ -54,24 +54,17 @@ def _measure(script: str, server_args: list, client_args: list) -> dict:
         server.wait(timeout=10)
 
 
-@pytest.mark.parametrize("variant, ping", [("plain", False), ("plain", True), ("keep", False)])
+@pytest.mark.parametrize("variant, ping", [("plain", False), ("plain", True), ("bbr", False)])
 def test_the_websocket_bench_measures_each_variant(variant, ping):
     if importlib.util.find_spec("websockets") is None:
         pytest.skip("needs websockets")
     result = _measure("ws_bench.py", ["--ping"] if ping else [], [variant])
     assert result["variant"] == variant and result["n"] == 3 and len(result["samples_ms"]) == 3
     assert all(ms > 0 for ms in result["samples_ms"])
-    if variant == "keep":
-        assert result["pings"] >= 1          # the client side pinged while the connection was idle
-    else:
-        assert result["pings"] == 0
 
 
-@pytest.mark.parametrize("keep", [False, True])
-def test_the_zenoh_bench_measures_with_and_without_the_keep_alive_file(keep):
+def test_the_zenoh_bench_measures_its_link():
     if importlib.util.find_spec("zenoh") is None:
         pytest.skip("needs eclipse-zenoh")
-    flags = ["--keep"] if keep else []
-    result = _measure("zenoh_bench.py", flags, flags)
-    assert result["variant"] == ("keep_alive" if keep else "default")
+    result = _measure("zenoh_bench.py", [], [])
     assert result["n"] == 3 and all(ms > 0 for ms in result["samples_ms"])

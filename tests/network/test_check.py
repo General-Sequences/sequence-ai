@@ -5,12 +5,14 @@ python -m sequence_ai.check against serve() on this machine, reached as a robot 
 each act an observation handed over and the act after it, on the robot's stream: a server that runs its model on a
 thread of its own and hands out an example observation, one that runs its model in its event loop and says nothing of
 how long it took, one whose ping does not say what it is, one that takes no robot's stream - and against no server, a
-server that wants a token, and a string that is no address.
+server that wants a token, and a string that is no address; and a deployment on GS's platform by its name, its worker
+checked as a robot reaches it and its address never said.
 """
 from __future__ import annotations
 
 import contextlib
 import os
+import re
 import socket
 import sys
 import threading
@@ -157,6 +159,107 @@ def test_no_server_a_server_that_wants_a_token_and_no_address_end_with_status_2_
         assert status == 0 and by_name(rows)["first act"].status == "ok", rows
     rows, status = check.run("127.0.0.1:8000")
     assert status == 2 and rows[0].detail == "127.0.0.1:8000 is not an address: give it as http://<host>:<port>"
+
+
+class Platform:
+    """sequence-cloud as connect() reaches it for a deployment's name: by_name() hands back the robot's connection to
+    the worker the platform seats it on - here, serve() on this machine at `url`."""
+
+    def __init__(self, url: str) -> None:
+        self.url, self.asked = url, []
+
+    def by_name(self, name, *more, **options):
+        import sequence_ai
+
+        self.asked.append((name, options.get("api_key")))
+        return sequence_ai.connect(self.url)
+
+    def follow(self, token, url, base_url, lines):
+        return None                                         # no rented GPU's allow list to join
+
+
+def test_a_deployment_is_checked_by_its_name_on_its_worker_whose_address_is_never_said(monkeypatch, tmp_path, capsys):
+    import sequence_ai
+
+    np.savez(tmp_path / "observation.npz", **observation())
+    with serving_on(serving.App(model)) as url:
+        platform = Platform(url)
+        monkeypatch.setattr(sequence_ai, "first", lambda group: platform if group == "sequence_ai.api" else None)
+        rows, status = check.run("my_policy_user", api_key="seq_robot_xxxxxxxxxxxx", observation=observation(), pings=5)
+        with pytest.raises(SystemExit) as ended:
+            check.main(["my_policy_user", "--api-key", "seq_robot_xxxxxxxxxxxx",
+                        "--observation", str(tmp_path / "observation.npz")])
+        out = capsys.readouterr().out
+    got = by_name(rows)
+    assert platform.asked == [("my_policy_user", "seq_robot_xxxxxxxxxxxx")] * 2
+    assert status == 0 and ended.value.code == 0, (rows, out)
+    for name in ("server", "round trip", "pings when idle", *ACTS):
+        assert got[name].status == "ok", got[name]
+    assert got["server"].detail == ("my_policy_user, a deployment on GS's platform: its worker answers /ping with 200 "
+                                    "and takes the robot's stream (x-seq-stream/3)")
+    # the worker's own time alone: an act's whole time holds the network's, which is not said
+    assert re.fullmatch(r"its worker says it took \d+\.\d ms of an act; the rest was outside it, on the network and in "
+                        r"this machine", got["server time"].detail), got["server time"]
+    assert re.fullmatch(r"its worker took \d+\.\d ms on the first act, \d+\.\d ms on the next ones \(observation from "
+                        r"--observation\)", got["first act"].detail), got["first act"]
+    assert not any(" ms" in got[name].detail for name in ("round trip", "pings in inference"))
+    assert out.startswith("sequence-ai check: my_policy_user\n") and "  ok  first act" in out
+    where = url.split("://", 1)[1]
+    assert where not in out and not any(where in row.detail for row in rows)      # the worker's address, never said
+
+
+def test_a_name_without_sequence_cloud_says_where_names_come_from_and_ends_with_status_2(monkeypatch):
+    import sequence_ai
+
+    monkeypatch.setattr(sequence_ai, "first", lambda group: None)
+    rows, status = check.run("my_policy_user")
+    assert status == 2 and rows[0].name == "server" and rows[0].status == "no"
+    assert "sequence-cloud" in rows[0].detail and "pip install -U sequence-ai" in rows[0].detail
+
+
+def _checked(monkeypatch, rows, status):
+    """check.run as a stand-in that answers `rows`, `status`: each call's arguments kept."""
+    calls = []
+
+    def run(target, **options):
+        calls.append((target, options))
+        return rows, status
+
+    monkeypatch.setattr(check, "run", run)
+    return calls
+
+
+@pytest.mark.parametrize("status", [0, 1, 2])
+def test_seq_check_is_python_m_sequence_ai_check_its_arguments_lines_and_exit_status(monkeypatch, tmp_path, capsys,
+                                                                                    status):
+    from seq import cli
+
+    (tmp_path / "observation.json").write_text('{"state": [0.1]}')
+    rows = [check.Row("ok", "server", "it answers"), check.Row("no" if status else "ok", "round trip", "3 pings")]
+    for argv in (["http://127.0.0.1:9", "--token", "s3cret", "--wait", "5"],
+                 ["my_policy_user", "--api-key", "seq_robot_xxxxxxxxxxxx", "--observation",
+                  str(tmp_path / "observation.json")]):
+        calls = _checked(monkeypatch, rows, status)
+        with pytest.raises(SystemExit) as ended:
+            check.main(argv)
+        by_module = capsys.readouterr().out
+        assert cli.main(["check", *argv]) == ended.value.code == status
+        assert capsys.readouterr().out == by_module and by_module.startswith(f"sequence-ai check: {argv[0]}\n")
+        assert len(calls) == 2 and calls[0] == calls[1]                  # the same check, asked the same way
+    # and the same arguments, each with its help: one definition read by both
+    module = check.add_arguments(__import__("argparse").ArgumentParser())
+    seq_check = cli.build_parser()._subparsers._group_actions[0].choices["check"]
+    said = lambda parser: sorted((a.dest, tuple(a.option_strings), a.default, a.type, a.help)  # noqa: E731
+                                 for a in parser._actions if a.dest != "help")
+    assert said(seq_check) == said(module) and seq_check.description == check.DESCRIPTION
+
+
+def test_seq_help_lists_check(capsys):
+    from seq import cli
+
+    with pytest.raises(SystemExit) as ended:
+        cli.main(["--help"])
+    assert ended.value.code == 0 and "\n  check <url|name>  " in capsys.readouterr().out
 
 
 def test_a_refusal_is_said_as_soon_as_the_server_listens_not_at_the_end_of_the_wait():

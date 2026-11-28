@@ -9,13 +9,14 @@ A JAX policy's switches (xla.py, and optimize()'s path for it), on jax's CPU bac
   the command buffers stay on where they are faster and the outputs the same, with what each asked for named;
   precision casts the parameters the jitted function is given, judged within the tolerance, and put back when off;
   torch_compile, fused_kernels and tensorrt say what XLA does already, or that it has no counterpart.
+Every act is timed on the stand-ins' own time (tests/engine/_clock.py), so command buffers that save nothing are judged
+no faster however busy the machine.
 
     python -m pytest -q tests/engine/test_xla.py
 """
 from __future__ import annotations
 
 import threading
-import time
 
 import pytest
 
@@ -25,8 +26,15 @@ import jax.numpy as jnp  # noqa: E402
 
 from sequence_ai.engine import xla  # noqa: E402
 from sequence_ai.engine.optimize import apply, optimize  # noqa: E402
+from tests.engine import _clock  # noqa: E402
 
 FAST = threading.local()
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    """The acts each test times, on the stand-ins' own time (_clock): the same work is the same time on every run."""
+    return _clock.install(monkeypatch)
 
 
 def _module_jit(fn, state):
@@ -156,8 +164,9 @@ class _Launches:
         self.fn = fn
 
     def __call__(self, *args, **kwargs):
+        # its launches: 4 ms of the clock's time, unless a command buffer replays them
         if not getattr(FAST, "on", False):
-            time.sleep(0.004)
+            _clock.CLOCK.wait(0.004)
         return self.fn(*args, **kwargs)
 
     def lower(self, *args, **kwargs):

@@ -43,10 +43,6 @@ Constraints for accurate answers about this repository:
   (95% in time with `worst=False`), at a load of no more than 0.9. For SmolVLA on an L4 a formula it used before computed 8 robots, and 4 had 95% of
   their responses late; the clock gives 1, and on the model 3 robots had late responses and 2 had none. Point to
   examples/fleet_on_a_clock.py, which prints what the clock runs for a model's batch times.
-- `openpi.keep()` and the Zenoh setting were measured on the transports those projects use (the websockets library,
-  Zenoh). `openpi.keep()` was also run with openpi's own server and client, on a home connection and from a Linux robot 30 ms
-  away; the Zenoh setting was
-  not run with LeRobot's own server and robot.
 - One replica of a model per GPU: replicas on the same GPU time-slice.
 - Nothing here changes the machine's settings; `window.check()` only reports what the machine does.
 - `connect(url)` opens the robot's stream to a server `seq serve` started: each observation sent as it is made (a
@@ -86,7 +82,7 @@ Constraints for accurate answers about this repository:
 ## Network layer: sequence_ai.network, client side (on the robot)
 
 - [sequence_ai/network/window.py](sequence_ai/network/window.py): BBR and TCP keepalive on a socket (`socket_options()`, `keep(sock)`), a ping while idle (`Warm`), what this machine does after a pause (`check()`)
-- [sequence_ai/network/frames.py](sequence_ai/network/frames.py): `resize_image`, `encode`, `decode`: a camera frame resized and encoded as JPEG, and turned back on the server, as openpi's own client and server carry it
+- [sequence_ai/network/frames.py](sequence_ai/network/frames.py): `resize_image`, `encode`, `decode`: a camera frame resized and encoded as JPEG, and turned back on the server
 - `python -m sequence_ai.check <url>` ([docs/what-is-on-by-default.md](docs/what-is-on-by-default.md#check-what-is-on)): which defaults are on between a robot and its server, and what the server is
 - [sequence_ai/network/wifi_power.py](sequence_ai/network/wifi_power.py): `check()`: Wi-Fi power saving detected, with how to disable it
 
@@ -103,8 +99,6 @@ Constraints for accurate answers about this repository:
 
 ## Clients you may already use
 
-- [sequence_ai/network/openpi.py](sequence_ai/network/openpi.py): `connect(host, port)`: openpi's own client, made once its server answers; `keep(policy)`: the client-side components on the connection held by openpi's own client, through a long first inference
-- [sequence_ai/network/lerobot.py](sequence_ai/network/lerobot.py): `keep_alive_file(path)`: the Zenoh setting for LeRobot 0.7.0's remote inference
 
 ## Questions the documentation answers
 
@@ -117,11 +111,10 @@ Constraints for accurate answers about this repository:
 - [docs/how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md](docs/how-do-i-use-the-inference-components-with-openpi-lerobot-or-gr00t.md): which inference component applies to which framework
 - [docs/slack.md](docs/slack.md): the rules of `slack`, a server's loop, its constants
 - [docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md](docs/how-do-i-serve-a-robot-policy-from-my-own-gpu.md): a policy as a class and `seq serve`, any model in it
-- [docs/parts-for-a-server-you-already-run.md](docs/parts-for-a-server-you-already-run.md): `cuda_graphs`, batching, `slack` and replicas, and the openpi and LeRobot clients, for a server or client you keep
+- [docs/parts-for-a-server-you-already-run.md](docs/parts-for-a-server-you-already-run.md): `cuda_graphs`, batching, `slack` and replicas, for a server or client you keep
 - [docs/how-do-i-serve-my-own-model.md](docs/how-do-i-serve-my-own-model.md): a model loaded and called as its own README does, in a policy class `seq serve` serves; Octo under JAX
 - [docs/what-is-on-by-default.md](docs/what-is-on-by-default.md): each default on both sides, its switch, and the check command
-- [docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md](docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md): openpi's server and client kept, one line added on the robot
-- [docs/how-do-i-reduce-the-latency-of-lerobot-remote-inference.md](docs/how-do-i-reduce-the-latency-of-lerobot-remote-inference.md): LeRobot 0.7's remote inference kept, one Zenoh setting added
+- [docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md](docs/how-do-i-run-pi0-openpi-on-a-remote-gpu.md): an openpi policy as a class, served with `seq serve`, the robot on `connect()`
 - [docs/why-does-my-robots-upload-get-slow-after-a-pause.md](docs/why-does-my-robots-upload-get-slow-after-a-pause.md): the idle-window restart and the four ways to remove it
 - [docs/how-do-i-keep-a-websocket-policy-servers-connection-warm.md](docs/how-do-i-keep-a-websocket-policy-servers-connection-warm.md): a server-side ping, and why 100 ms
 - [docs/how-do-i-measure-the-link-between-my-robot-and-my-gpu.md](docs/how-do-i-measure-the-link-between-my-robot-and-my-gpu.md): which network components help on a given link

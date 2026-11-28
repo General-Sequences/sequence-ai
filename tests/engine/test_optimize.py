@@ -15,6 +15,8 @@ one guarantee, with the CUDA graph replaced by a stand-in (`capture`), so they r
   a batch function is checked at each of its sizes;
   the random states after optimize() are what they would have been without it;
   the modules are found in a function's closure and globals, a bound method's object and a partial's arguments.
+Every act is timed on the stand-ins' own time (tests/engine/_clock.py): what a switch saves is what its stand-in saves,
+however busy the machine, so a switch that saves nothing is never kept by a slow moment of eager mode.
 
     python -m pytest -q tests/engine/test_optimize.py
 """
@@ -33,15 +35,23 @@ np = pytest.importorskip("numpy")
 
 from sequence_ai.engine import cuda_graphs  # noqa: E402
 from sequence_ai.engine.optimize import Optimized, _namespace, apply, differences, optimize  # noqa: E402
+from tests.engine import _clock  # noqa: E402
 
-# While set, the stand-in modules skip their sleep: what a replayed graph saves, the time of launching its kernels.
+# While set, the stand-in modules skip their wait: what a replayed graph saves, the time of launching its kernels.
 FAST = threading.local()
 SLEEP_S = 0.004
 
 
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    """The acts each test times, on the stand-ins' own time (_clock): the same work is the same time on every run."""
+    return _clock.install(monkeypatch)
+
+
 def _slow() -> None:
+    # a kernel's launch: SLEEP_S of the clock's time, unless a graph replays it
     if not getattr(FAST, "on", False):
-        time.sleep(SLEEP_S)
+        _clock.CLOCK.wait(SLEEP_S)
 
 
 class _Replay:
@@ -167,15 +177,12 @@ def test_a_graph_right_only_for_the_inputs_it_was_captured_on_is_taken_out_and_t
 
 
 def test_a_switch_that_is_no_faster_is_taken_out():
-    global SLEEP_S
-    SLEEP_S, kept = 0.01, SLEEP_S
-    try:
-        model = _Flow().eval()
-        fast = optimize(_policy_of(model), _examples(2), capture=_Slowly, say=lambda line: None, whole_graph=False)
-    finally:
-        SLEEP_S = kept
+    # a replay that takes as long as eager mode: on the stand-ins' clock exactly as long, so it is "no faster", never a
+    # few percent either way as the wall clock had it
+    model = _Flow().eval()
+    fast = optimize(_policy_of(model), _examples(2), capture=_Slowly, say=lambda line: None, whole_graph=False)
     why = fast.report["switches"]["cuda_graphs"]["why"]
-    assert not fast.report["switches"]["cuda_graphs"]["on"] and ("no faster" in why or "under the 10%" in why)
+    assert not fast.report["switches"]["cuda_graphs"]["on"] and why.startswith("no faster with it (act "), why
     assert "forward" not in vars(model.dit)
 
 
@@ -336,8 +343,9 @@ class _HeavyDenoiser(_Denoiser):
     running."""
 
     def forward(self, x):
+        # its arithmetic: SLEEP_S of the clock's time, unless a switch computes less (LIGHT)
         if not getattr(LIGHT, "on", False):
-            time.sleep(SLEEP_S)
+            _clock.CLOCK.wait(SLEEP_S)
         return super().forward(x)
 
 

@@ -94,10 +94,10 @@ may already use:
 
 ```bash
 python3 bench/ws_bench.py server 9101                     # server side; --ping: the server pings every 100 ms
-python3 bench/ws_bench.py client HOST 9101 plain          # client side: plain, keep (openpi.keep) or bbr
+python3 bench/ws_bench.py client HOST 9101 plain          # client side: plain, or bbr (BBR on its socket)
 
-python3 bench/zenoh_bench.py server 7447                  # --keep: with lerobot.keep_alive_file()'s settings
-python3 bench/zenoh_bench.py client HOST 7447             # --keep here too: both ends take the file
+python3 bench/zenoh_bench.py server 7447
+python3 bench/zenoh_bench.py client HOST 7447
 ```
 
 Each client uploads 100 KB half a second after each response, 40 times, and prints one `RESULT` line with every

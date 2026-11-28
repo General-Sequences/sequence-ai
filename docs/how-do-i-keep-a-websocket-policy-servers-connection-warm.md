@@ -19,12 +19,6 @@ async with websockets.serve(handler_user, host_user, port_user, **ping.websocket
     ...
 ```
 
-openpi's own policy server is built on the `websockets` library. Started through `python -m sequence_ai.network.openpi`,
-it pings each connection every 100 ms as well, with no change to its files, except while an inference runs: it runs its
-policy on its event loop, which sends and answers no ping until the inference is done, so it waits for each pong as
-long as that takes rather than 20 s:
-[How do I run π0 (openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md)
-
 Under uvicorn:
 
 ```python
@@ -113,9 +107,7 @@ warm_user.used()                                                   # call it eac
 ```
 
 **A WebSocket server you cannot change.** Ping from the client side, on the connection your client already holds.
-With openpi's client it is one line, `openpi.keep(policy)`: see
-[How do I run π0 (openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md) With your own `websockets`
-client:
+With your own `websockets` client:
 
 ```python
 from websockets.sync.client import connect as ws_connect

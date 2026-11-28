@@ -3,6 +3,24 @@
 What changed in each release of SequenceLink's package, `sequence-ai`, newest first. It starts at 0.34.10. The same notes are public at
 https://generalsequences.com/docs/changelog/.
 
+## 0.67.0
+
+An eval runs any tasks you pick from our benchmarks and `seq eval run --again <id>` runs one again,
+`pip install sequence-ai` brings sequence-cloud along, `chat()` takes a decision model, `seq check` a deployment's
+name, `sequence_ai.speech()` and `seq speech` read text aloud, and `connect()` holds each act to its `timeout_s`.
+
+### Changed
+
+- The console opens on Model APIs, its sidebar Model APIs, Policies, Benchmarks (your runs, each with Run again) and
+  GPUs, with no Robots page.
+- Starter holds 3 policies and 5 GPU cards at once, with no limit on benchmarks.
+
+### Removed
+
+- `seq port`, `seq init <benchmark>`, `seq benchmark upgrade`, `source`, `logs`, `shell`, `status`, `cancel` and `rm`
+  with their `seq.benchmark_*` functions, and `sequence_ai.network.openpi` and `.lerobot` with their quickstarts, are
+  gone.
+
 ## 0.66.3 — 2026-11-24
 
 `seq serve` and `sequence_ai.check` say a round trip in words where they printed milliseconds.

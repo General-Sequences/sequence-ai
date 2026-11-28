@@ -7,8 +7,8 @@ unchanged. Each is named here with its license.
 ## openpi
 
 - **Where:** `sequence_ai/network/frames.py`, `resize_image` with `mode="pad"`, and the reference it is compared with in
-  `tests/network/test_frames.py`; `sequence_ai/network/openpi.py`, `image_tools.convert_to_uint8` for an array.
-- **From:** `_resize_with_pad_pil` and `convert_to_uint8` in
+  `tests/network/test_frames.py`.
+- **From:** `_resize_with_pad_pil` in
   `packages/openpi-client/src/openpi_client/image_tools.py` of
   [Physical-Intelligence/openpi](https://github.com/Physical-Intelligence/openpi).
 - **Why:** so that a frame resized here is, byte for byte, the frame openpi's own client sends.

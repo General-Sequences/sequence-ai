@@ -241,6 +241,5 @@ the README's [results](../README.md#results).
 
 - [How do I serve a robot policy from my own GPU?](how-do-i-serve-a-robot-policy-from-my-own-gpu.md)
 - [How do I run π0 (openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md)
-- [How do I reduce the latency of LeRobot remote inference?](how-do-i-reduce-the-latency-of-lerobot-remote-inference.md)
 - [How do I get a GPU near my robot?](how-do-i-get-a-gpu-near-my-robot.md)
 - A step failed: [FAQ](faq.md)

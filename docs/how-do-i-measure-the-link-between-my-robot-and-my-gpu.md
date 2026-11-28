@@ -130,4 +130,5 @@ tcp_link.read(sock_user)             # any connected socket: rtt_ms, rttvar_ms, 
 tcp_link.of(scope_user["client"])    # in an ASGI app served with one_write_http(): this request's own connection
 ```
 
-and on the robot, `policy.stats()["latency_us"]["act_us"]` gives each act's p50, p95 and p99 as the robot saw them.
+and on the robot, `policy.stats()["latency_us"]["act_us"]` gives each act's p50, p95 and p99 as the robot saw them, and
+`worker_us` and `network_us` beside it split each act into its worker's own time and the rest of the round trip.

@@ -7,9 +7,8 @@ Python 3.12, so the components that read the Linux kernel return `None` or `Fals
 | Client side | Server side | Both sides | Combined |
 |---|---|---|---|
 | [`window`](#window-the-congestion-window-kept-through-the-pauses) | [`ping`](#ping-a-server-side-ping) | [`msgpack_io`](#msgpack_io) | [`connect`](#connect-the-robots-own-connection) |
-| [`frames`](#frames-a-frame-resized-before-upload-and-decoded-on-the-server) | [`one_write`](#one_write-a-response-in-one-write) | [`latency_stats`](#latency_stats) | [`openpi`](#openpi-and-lerobot) |
-| [`wifi_power`](#wifi_power-wi-fi-power-saving-detected) | [`tcp_link`](#tcp_link-each-clients-link-read-from-the-kernel) | | [`lerobot`](#openpi-and-lerobot) |
-| | | | [`bench/`](how-do-i-measure-the-link-between-my-robot-and-my-gpu.md) |
+| [`frames`](#frames-a-frame-resized-before-upload-and-decoded-on-the-server) | [`one_write`](#one_write-a-response-in-one-write) | [`latency_stats`](#latency_stats) | [`bench/`](how-do-i-measure-the-link-between-my-robot-and-my-gpu.md) |
+| [`wifi_power`](#wifi_power-wi-fi-power-saving-detected) | [`tcp_link`](#tcp_link-each-clients-link-read-from-the-kernel) | | |
 
 What a component saves depends on your link, and every number below is given with the link it was measured on. The
 inference components (`sequence_ai.engine`) are described in the [README](../README.md#inference-layer).
@@ -250,53 +249,3 @@ A percentile is `None` until its window contains enough samples for it: the p99 
 ```text
 200 requests: p50 25 ms, p95 28 ms, p99 29 ms
 ```
-
-## openpi and LeRobot
-
-**openpi.** Keep openpi's client and server. On the GPU, `openpi.patch()` in openpi's server script, before it makes
-the server: it then pings each robot every 100 ms while no inference runs, and hands its policy each picture sent as
-JPEG as the array it reads. openpi's server runs its policy on its event loop, which sends and answers no ping while an
-inference runs, so it waits for each pong as long as that takes. On the robot, import `image_tools` from here, so its
-pictures go as JPEG, and add the client-side components to the connection the client holds.
-
-```python
-from sequence_ai.network import openpi
-
-openpi.patch()                                        # the GPU: in openpi's scripts/serve_policy.py, before the server
-```
-
-```python
-from sequence_ai.network import openpi
-from sequence_ai.network.openpi import image_tools     # in place of openpi_client's: pictures go as JPEG
-
-policy_user = openpi.connect(host_user, port_user)    # openpi_client's own client, once its server answers
-kept_user = openpi.keep(policy_user)  # BBR and TCP keepalive on its socket; a WebSocket ping while it is idle
-observation_user["observation/image"] = image_tools.resize_with_pad(frame_user, 224, 224)
-action_user = policy_user.infer(observation_user)     # as before
-```
-
-`keep()` is verified against openpi-client 0.1.2 on a local connection, and the server side and `image_tools` against
-a server module built as openpi's `websocket_policy_server.py` is. Measured on a WebSocket connection of the kind
-openpi's client holds, between two cloud machines: a 100 KB upload 0.53 s after each response took two to three round
-trips without `keep()` and one with it ([Measurements](measurements.md)). With openpi's own server and client, `keep()`
-was measured in one closed-loop run ([the table](measurements.md#openpikeep-with-openpis-own-server-and-client)), and
-the pictures as JPEG with the server's pings in another
-([the table](measurements.md#pictures-as-jpeg-with-openpis-own-server-and-client)).
-[How do I run π0 (openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md)
-
-**LeRobot.** LeRobot 0.7.0's remote inference talks over Zenoh, which sends a frame on an idle link only every few
-seconds. One setting makes it every 100 ms:
-
-```python
-from sequence_ai.network import lerobot
-
-path_user = lerobot.keep_alive_file("zenoh-keep-alive.json5")
-```
-
-Give the file to both sides: the policy server reads it from `zenoh.config_file`, and the robot's remote inference
-from `zenoh_config_path`.
-
-Checked: Zenoh 1.10.2 takes the setting, and two idle peers on one machine then sent a frame every 102 ms each way.
-Measured between two Zenoh peers on two cloud machines: a 100 KB request 0.53 s after each response took two to three
-round trips without the file and one with it ([Measurements](measurements.md)).
-[How do I reduce the latency of LeRobot remote inference?](how-do-i-reduce-the-latency-of-lerobot-remote-inference.md)

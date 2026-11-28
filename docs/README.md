@@ -15,7 +15,7 @@ Each page here answers one question, starts with the answer and its code, and ca
 - [What is on by default, and how do I turn each part off?](what-is-on-by-default.md). Both sides, every part, and the
   command that says which are on.
 - [Parts for a server you already run](parts-for-a-server-you-already-run.md). `cuda_graphs`, batching, `slack` and
-  replicas, and the openpi and LeRobot clients, a file each.
+  replicas, a file each.
 - [Quickstart: batching and replicas](quickstart-inference.md). Two commands, one short file, every step's output.
 - [FAQ: errors you may see, and what to do next](faq.md). Each error as the code prints it.
 - [How do I drive a robot from a console, and record what I do?](how-do-i-drive-a-robot-from-a-console.md).
@@ -28,8 +28,7 @@ The code is the same wherever the GPU comes from: `seq serve` on it, `connect(..
 | You have | Read | Runnable example |
 |---|---|---|
 | A model of your own, or any PyTorch policy | [How do I serve a robot policy from my own GPU?](how-do-i-serve-a-robot-policy-from-my-own-gpu.md), then [How many robots can one GPU serve?](how-many-robots-can-one-gpu-serve.md) | [`quickstart_policy/policy.py`](../examples/quickstart_policy/policy.py), [`quickstart_robot.py`](../examples/quickstart_robot.py), [`pytorch_policy/policy.py`](../examples/pytorch_policy/policy.py) |
-| openpi (π0, π0.5) | [How do I run π0 (openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md) | [`quickstart_openpi.py`](../examples/quickstart_openpi.py) |
-| LeRobot | [How do I reduce the latency of LeRobot remote inference?](how-do-i-reduce-the-latency-of-lerobot-remote-inference.md) | [`quickstart_lerobot.py`](../examples/quickstart_lerobot.py) |
+| openpi (π0, π0.5) | [How do I run π0 (openpi) on a remote GPU?](how-do-i-run-pi0-openpi-on-a-remote-gpu.md) | [`serve_openpi_batched.py`](../examples/serve_openpi_batched.py) |
 | GR00T, or another PyTorch policy | [How do I make a PyTorch robot policy faster without changing its outputs?](how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md) | [`graph_a_module.py`](../examples/graph_a_module.py) |
 | Octo, or another JAX policy | [How do I serve my own model?](how-do-i-serve-my-own-model.md) | its code, on that page |
 | No GPU near the robot | [How do I get a GPU near my robot?](how-do-i-get-a-gpu-near-my-robot.md) | the same files, with that GPU's address |

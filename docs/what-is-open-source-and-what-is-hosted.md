@@ -13,7 +13,7 @@ Everything a robot and its GPU run, and what a policy is written with:
 - **On the GPU:** `seq serve` and the `@seq.policy` decorators a policy is written with, and the inference components
   the server uses, which a server of your own can use as well: `cuda_graphs`, `batcher` and `slack`, with `replicas` beside them (`sequence_ai/engine/`).
 - **On the robot, and between the two:** `sequence_ai.connect()` and the network components on each end
-  (`sequence_ai/network/`), with `openpi` and `lerobot` for the clients and servers of those projects.
+  (`sequence_ai/network/`).
 - **A policy and an official template, on your own GPU:** the decorators a policy is written with, and `seq init`,
   `seq serve` and `seq weights get`, which run an official template where you choose.
 - **Teleoperation:** the robot's side, the console - its page and `sequence_ai.teleop()` - the direct connection

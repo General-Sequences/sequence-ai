@@ -13,7 +13,6 @@ A robot keeps one such connection open to a WebSocket policy server (openpi's cl
 The server responds to each message with two bytes; `--ping` makes it ping each connection (ping.websockets_options()).
 The client's VARIANT selects what the client side does:
     plain    nothing: the `websockets` client as it is
-    keep     openpi.keep() on the connection: TCP keepalive, a ping when idle, BBR where this machine allows it
     bbr      BBR alone on the socket (window.keep); False in the result where the machine does not allow it
 
 What runs: the client connects, uploads 1 MB once (which opens the window as a first large observation would), waits one
@@ -22,8 +21,7 @@ uncounted, then `samples` times counted. It prints one line, `RESULT {json}`: th
 uploads, and every sample, in milliseconds.
 
 The pause is counted from the response, as bench/client.py counts it: the connection has then sent nothing for the pause
-plus one RTT. `keep` runs on a stand-in for openpi's client (an object with the two members keep() uses: the connection
-at `_ws`, and `infer`), so the measurement needs no openpi checkout.
+plus one RTT.
 
 Needs websockets: pip install websockets.
 """
@@ -61,14 +59,13 @@ def client(host: str, port: int, variant: str, size: int = 100_000, pause: float
     """Upload `size` bytes `pause` seconds after each response, and return the timings (the module's docstring)."""
     import websockets.sync.client as sync_client
 
-    from sequence_ai.network import openpi as adapter
     from sequence_ai.network import window
 
     # as a context manager: websockets 17 deprecates a sync connection opened without one
     with sync_client.connect(f"ws://{host}:{port}", compression=None, max_size=None) as ws:
         ws.recv()
 
-        # what keep() uses of openpi's client: a connection at _ws, and infer
+        # one request and its reply on the connection, as a policy's client sends an observation
         class Policy:
             def __init__(self) -> None:
                 self._ws = ws
@@ -78,14 +75,11 @@ def client(host: str, port: int, variant: str, size: int = 100_000, pause: float
                 return self._ws.recv()
 
         policy = Policy()
-        kept, bbr = None, None
-        if variant == "keep":
-            kept = adapter.keep(policy)
-            bbr = kept.bbr
-        elif variant == "bbr":
+        bbr = None
+        if variant == "bbr":
             bbr = window.keep(ws.socket)
         elif variant != "plain":
-            raise SystemExit(f"VARIANT is plain, keep or bbr; got {variant!r}")
+            raise SystemExit(f"VARIANT is plain or bbr; got {variant!r}")
         payload = os.urandom(size)
         policy.infer(os.urandom(WIDEN))
         time.sleep(1.0)
@@ -99,10 +93,7 @@ def client(host: str, port: int, variant: str, size: int = 100_000, pause: float
         p95 = sorted(rows)[int(0.95 * (len(rows) - 1))]
         result = {"bench": "ws", "variant": variant, "port": port, "size": size, "pause_s": pause, "n": len(rows),
                   "p50_ms": round(statistics.median(rows), 2), "p95_ms": round(p95, 2), "bbr": bbr,
-                  "congestion": window.congestion_of(ws.socket), "pings": kept.warm.pings if kept else 0,
-                  "samples_ms": rows}
-        if kept:
-            kept.close()
+                  "congestion": window.congestion_of(ws.socket), "samples_ms": rows}
     return result
 
 
@@ -116,7 +107,7 @@ def main(argv: "list[str] | None" = None) -> "dict | None":
     client_args = roles.add_parser("client")
     client_args.add_argument("host")
     client_args.add_argument("port", type=int)
-    client_args.add_argument("variant", choices=["plain", "keep", "bbr"])
+    client_args.add_argument("variant", choices=["plain", "bbr"])
     client_args.add_argument("--size", type=int, default=100_000, help="bytes of each upload")
     client_args.add_argument("--pause", type=float, default=0.53, help="seconds of silence after each response")
     client_args.add_argument("--samples", type=int, default=40)

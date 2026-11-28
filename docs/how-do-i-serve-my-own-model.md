@@ -73,7 +73,5 @@ returns one step at a time leaves the arm waiting for each step:
 
 The same class, with the model's PyTorch call in `@seq.infer`:
 [How do I serve a robot policy from my own GPU?](how-do-i-serve-a-robot-policy-from-my-own-gpu.md#your-model-in-a-class)
-has a PyTorch module, [How do I make a PyTorch robot policy faster without changing its
-outputs?](how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md) has GR00T, and [How do I
-reduce the latency of LeRobot remote inference?](how-do-i-reduce-the-latency-of-lerobot-remote-inference.md) has
-LeRobot's policies.
+has a PyTorch module, LeRobot's policies among them, and [How do I make a PyTorch robot policy faster without
+changing its outputs?](how-do-i-make-a-pytorch-robot-policy-faster-without-changing-its-outputs.md) has GR00T.
